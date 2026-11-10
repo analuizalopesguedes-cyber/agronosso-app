@@ -4,11 +4,21 @@ Aplicativo que ajuda pessoas do campo a entender documentos: a pessoa fotografa 
 o AgroNosso lê o texto (OCR), explica em linguagem simples (IA), destaca prazos e valores,
 traduz palavras difíceis, ajuda a anotar dúvidas e mostra quando procurar orientação especializada.
 
-## Como rodar
+## Abrir pela web
+
+Depois que o workflow do GitHub Actions concluir a publicação, abra:
+
+**https://analuizalopesguedes-cyber.github.io/agronosso-app/**
+
+O app pode ser aberto pelo navegador do celular ou computador. No celular, use a opção do navegador
+para adicionar o site à tela inicial, se quiser um atalho semelhante a um aplicativo. Sem configurar
+um servidor, ele funciona em modo demonstração com documentos fictícios; a leitura real de fotos
+com OCR e IA precisa do servidor descrito abaixo.
+
+## Rodar durante o desenvolvimento
 
 ```bash
-npm install
-npx expo install --fix   # alinha as versões com a sua versão do Expo
+npm ci
 npx expo start
 ```
 
