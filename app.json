@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "AgroNosso",
+    "slug": "agronosso",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F4EFE4"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "br.com.agronosso.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "O AgroNosso usa a câmera para fotografar seus documentos e explicar o que está escrito.",
+        "NSPhotoLibraryUsageDescription": "O AgroNosso usa suas fotos para ler documentos que você já fotografou."
+      }
+    },
+    "android": {
+      "package": "br.com.agronosso.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F4EFE4"
+      },
+      "permissions": ["CAMERA"]
+    },
+    "web": {
+      "favicon": "./assets/icon.png"
+    },
+    "plugins": [
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "O AgroNosso usa a câmera para fotografar seus documentos e explicar o que está escrito.",
+          "photosPermission": "O AgroNosso usa suas fotos para ler documentos que você já fotografou."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "backgroundColor": "#F4EFE4"
+        }
+      ]
+    ]
+  }
+}
