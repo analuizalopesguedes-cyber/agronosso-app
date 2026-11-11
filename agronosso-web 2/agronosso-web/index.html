@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>AgroNosso</title>
+  <meta name="description" content="O AgroNosso explica papéis e contratos do campo em palavras simples, com áudio e passo a passo.">
+  <meta name="theme-color" content="#F4EFE4" id="cor-tema">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="AgroNosso">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500&family=Source+Sans+3:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/estilo.css">
+  <script>
+    (function () {
+      try {
+        var c = JSON.parse(localStorage.getItem('agronosso.v1.config') || '{}');
+        var t = c.tema || 'auto';
+        var escuro = t === 'escuro' || (t === 'auto' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.tema = escuro ? 'escuro' : 'claro';
+        if (c.letra) document.documentElement.dataset.letra = c.letra === true ? 'grande' : c.letra;
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+  <a class="pular-conteudo" href="#tela">Ir para o conteúdo</a>
+
+  <header class="topo" id="topo">
+    <a href="#/inicio" class="topo-logo" aria-label="AgroNosso, ir para o início">
+      <img class="logo-padrao" src="assets/logo-agronosso.svg" alt="AgroNosso" width="96" height="58">
+      <img class="logo-claro" src="assets/logo-agronosso-claro.svg" alt="AgroNosso" width="96" height="58">
+    </a>
+    <div class="topo-acoes">
+      <button type="button" class="botao-letra" id="botao-letra" aria-pressed="false">
+        <span aria-hidden="true">A+</span> Letra<span class="rotulo-longo"> maior</span>
+      </button>
+      <a href="#/ajustes" class="botao-ajustes" id="botao-ajustes" aria-label="Ajustes: modo escuro, letra, voz e Libras"><span class="i" data-icone="engrenagem"></span></a>
+    </div>
+  </header>
+
+  <div class="aviso-offline" id="aviso-offline" role="status" hidden>
+    <span class="i" data-icone="sem-sinal"></span>
+    Sem internet. Seus papéis salvos continuam aqui.
+  </div>
+
+  <main id="tela" tabindex="-1" aria-live="polite"></main>
+
+  <nav class="abas" id="abas" aria-label="Menu principal">
+    <a href="#/inicio" data-aba="inicio"><span class="i" data-icone="casa"></span>Início</a>
+    <a href="#/papeis" data-aba="papeis"><span class="i" data-icone="papel"></span>Papéis</a>
+    <a href="#/perguntas" data-aba="perguntas"><span class="i" data-icone="balao"></span>Perguntas</a>
+    <a href="#/guia" data-aba="guia"><span class="i" data-icone="guia"></span>Como usar</a>
+  </nav>
+
+  <div class="aviso" id="aviso" role="status" aria-live="polite" hidden></div>
+
+  <noscript>
+    <p style="padding:24px;font-family:sans-serif">Para usar o AgroNosso, ative o JavaScript no navegador.</p>
+  </noscript>
+
+  <script src="js/icones.js"></script>
+  <script src="js/dados.js"></script>
+  <script src="js/analisador.js"></script>
+  <script src="js/audios.js"></script>
+  <script src="js/voz.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
