@@ -36,7 +36,8 @@
 
   const estado = {
     config: Object.assign({ visto: false, papel: null, letra: false, tema: 'auto', semLibras: false }, Banco.ler('config', {})),
-    papeis: Banco.ler('papeis', []),
+    papeis: Banco.ler('papeis', []).filter((p) => p.origem !== 'exemplo'), // exemplos não ficam guardados (M04)
+    exemplo: null, // exemplo aberto agora, só em memória
     perguntas: Banco.ler('perguntas', []),
     combinados: Banco.ler('combinados', []),
     rascunho: Banco.ler('rascunho', null),
@@ -45,8 +46,14 @@
     if (!Banco.gravar(chave, estado[chave])) avisar('Não foi possível guardar no celular. A memória pode estar cheia.');
   };
 
+  // Atualiza explicações guardadas com a versão nova do leitor (datas, fatos principais)
+  estado.papeis.forEach((p) => {
+    if (p.analise && !p.analise.fatos && p.analise.texto) { try { p.analise = A.analisar(p.analise.texto, p.papel); } catch (e) { /* mantém */ } }
+  });
+  const acharDoc = (id) => (id === 'exemplo' ? estado.exemplo : estado.papeis.find((p) => p.id === id));
+
   /* Fluxo atual de leitura (só em memória) */
-  const fluxo = { fotos: [], texto: '', exemplo: null, ativo: false };
+  const fluxo = { fotos: [], texto: '', exemplo: null, ativo: false, lido: null, origem: null, editandoId: null };
 
   /* =========================================================
      Aviso rápido (confirma ações e oferece Desfazer)
@@ -55,16 +62,21 @@
   let timerAviso = null;
   function avisar(texto, acao) {
     clearTimeout(timerAviso);
-    caixaAviso.innerHTML = `${I(/^(Não|A Libras precisa|Este celular não)/.test(texto) ? 'alerta' : 'circulo-certo')}<span class="txt">${esc(texto)}</span>${acao ? `<button type="button">${esc(acao.rotulo)}</button>` : ''}`;
+    const erro = /^(Não|A Libras precisa|Este celular não|Sem internet)/.test(texto);
+    // Erro não some sozinho: fica até a pessoa fechar (A10)
+    const botao = acao ? `<button type="button" data-aviso="acao">${esc(acao.rotulo)}</button>` : erro ? '<button type="button" data-aviso="fechar">Fechar</button>' : '';
+    caixaAviso.innerHTML = `${I(erro ? 'alerta' : 'circulo-certo')}<span class="txt">${esc(texto)}</span>${botao}`;
+    caixaAviso.setAttribute('role', erro ? 'alert' : 'status');
     caixaAviso.hidden = false;
-    if (acao) caixaAviso.querySelector('button').onclick = () => { acao.fazer(); caixaAviso.hidden = true; };
-    timerAviso = setTimeout(() => { caixaAviso.hidden = true; }, acao ? 7000 : 4000);
+    const b = caixaAviso.querySelector('button');
+    if (b) b.onclick = () => { if (acao) acao.fazer(); caixaAviso.hidden = true; };
+    if (!erro) timerAviso = setTimeout(() => { caixaAviso.hidden = true; }, acao ? 10000 : 5000);
   }
 
   /* =========================================================
      Confirmação (antes de excluir)
      ========================================================= */
-  function confirmar({ titulo, texto, sim = 'Excluir', nao = 'Cancelar' }) {
+  function confirmar({ titulo, texto, sim = 'Excluir', nao = 'Cancelar', icone = 'lixeira', conteudo = '' }) {
     return new Promise((resolver) => {
       const fundo = document.createElement('div');
       fundo.className = 'modal-fundo';
@@ -72,7 +84,8 @@
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-titulo">
           <h2 id="modal-titulo">${esc(titulo)}</h2>
           <p class="leitura">${esc(texto)}</p>
-          <button type="button" class="botao primario" data-r="sim">${I('lixeira')}${esc(sim)}</button>
+          ${conteudo}
+          <button type="button" class="botao primario" data-r="sim">${I(icone)}${esc(sim)}</button>
           <button type="button" class="botao secundario" data-r="nao">${esc(nao)}</button>
         </div>`;
       const fechar = (r) => { fundo.remove(); document.removeEventListener('keydown', tecla); resolver(r); };
@@ -140,7 +153,7 @@
       <div>${direita}</div>
     </div>`;
 
-  const ETAPAS_LEITURA = ['Quem é você', 'Foto', 'Leitura', 'Explicação'];
+  const ETAPAS_LEITURA = ['Quem é você', 'Foto', 'Conferir', 'Explicação'];
   function etapas(atual, nomes = ETAPAS_LEITURA) {
     const partes = nomes.map((n, i) => {
       const cls = i < atual ? 'feita' : i === atual ? 'atual' : '';
@@ -148,13 +161,21 @@
       const li = `<li class="${cls}"${i === atual ? ' aria-current="step"' : ''}><span class="bola">${bola}</span>${esc(n)}</li>`;
       return i < nomes.length - 1 ? li + `<li class="traco${i < atual ? ' feito' : ''}" aria-hidden="true"></li>` : li;
     });
-    return `<div class="grupo-justo"><p class="pequeno"><strong>Passo ${atual + 1} de ${nomes.length}:</strong> ${esc(nomes[atual])}</p><ol class="etapas" aria-label="Passos">${partes.join('')}</ol></div>`;
+    const DEPOIS = {
+      'Quem é você': 'Depois, você tira a foto do papel.',
+      Foto: 'Depois, o app lê as letras e você confere o que ele leu.',
+      Conferir: 'Depois, você vê a explicação em palavras simples.',
+      'Explicação': 'Último passo. Leia ou ouça com calma.',
+    };
+    const proximo = DEPOIS[nomes[atual]] ? `<p class="pequeno proximo-passo">${I('avancar', 16)}<span>${DEPOIS[nomes[atual]]}</span></p>` : '';
+    return `<div class="grupo-justo"><p class="pequeno"><strong>Passo ${atual + 1} de ${nomes.length}:</strong> ${esc(nomes[atual])}</p><ol class="etapas" aria-label="Passos">${partes.join('')}</ol>${proximo}</div>`;
   }
 
   const instrucoes = (lista) => `<ol class="instrucoes">${lista.map((p) => {
     const [t, sub] = Array.isArray(p) ? p : [p];
     return `<li><div><span class="leitura">${t}</span>${sub ? `<span class="auxiliar">${sub}</span>` : ''}</div></li>`;
   }).join('')}</ol>`;
+  const ehComputador = () => !!(window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches);
   const textoDe = (lista) => lista.map((p, i) => `Passo ${i + 1}. ${(Array.isArray(p) ? p.join('. ') : p).replace(/<[^>]+>/g, '')}`).join(' ');
 
   const SELO = {
@@ -174,8 +195,7 @@
   let slide = 0;
   const SLIDES = [
     { logo: true, titulo: 'Olá! Que bom ter você aqui.', texto: 'O AgroNosso explica papéis e combinados de terra em palavras simples. Você ouve, entende e decide com calma, junto com quem você confia.' },
-    { icone: 'camera', titulo: 'Você tira uma foto do papel', texto: 'Contrato de arrendamento, parceria, meação ou empréstimo do banco. O app lê as letras e explica parte por parte: quanto custa, até quando vale, quem paga o quê e como sair.' },
-    { icone: 'som', titulo: 'Você ouve e lê quantas vezes quiser', texto: 'Tudo tem um botão para ouvir. A explicação fica guardada para você rever depois com a família.' },
+    { icone: 'camera', titulo: 'Tire a foto e ouça a explicação', texto: 'Contrato de arrendamento, parceria, meação ou empréstimo do banco. O app lê as letras e explica quanto custa, até quando vale, quem paga o quê e como sair. Tudo tem botão para ouvir.' },
     { icone: 'escudo', titulo: 'Quem está por trás e os seus dados', texto: 'O AgroNosso é um projeto de estudantes de Design Digital da FIAP. Não é do dono da terra nem do banco. A foto e o texto ficam só no seu celular. Ninguém mais vê, a não ser que você mande.' },
     { icone: 'pessoas', titulo: 'É uma explicação, não uma decisão', texto: 'Quem decide é você e a sua família. Quando o assunto pesa, mostramos quem pode ajudar: sindicato, técnico, cartório ou advogado.' },
   ];
@@ -194,6 +214,7 @@
         <h1>${esc(s.titulo)}</h1>
         <p class="leitura">${esc(s.texto)}</p>
         ${ouvir('bv-' + slide, s.titulo + '. ' + s.texto)}
+        ${slide === 0 ? `<div class="grupo-justo" style="width:100%;max-width:26rem;margin-top:var(--s2)">${controleLetra()}</div>` : ''}
       </div>
       <div class="grupo">
         <div class="pontinhos" aria-label="Tela ${slide + 1} de ${SLIDES.length}" role="img">${SLIDES.map((_, i) => `<span class="${i === slide ? 'ativo' : ''}"></span>`).join('')}</div>
@@ -213,22 +234,24 @@
       html: `
       <div class="grupo-justo">
         <h1>O que você quer fazer hoje?</h1>
-        <p class="auxiliar">Escolha uma opção. Cada uma tem o passo a passo.</p>
+        <p class="leitura">O AgroNosso explica papéis e combinados de terra em palavras simples. Escolha uma opção abaixo.</p>
       </div>
-      ${chaveTema()}
 
-      <section class="cartao escuro" aria-labelledby="t-entender">
+      <section class="cartao escuro heroi" aria-labelledby="t-entender">
         <div class="linha"><span class="ic claro">${I('camera')}</span><h2 id="t-entender" class="t-secao">Entender um papel</h2></div>
         <p class="leitura claro">Tire uma foto do contrato e a gente explica parte por parte, em palavras simples.</p>
         <a class="botao destaque" href="#/entender">${I('camera')}Começar</a>
+        <a class="botao claro-sec" href="#/combinado">${I('lapis')}Não tem papel? Anotar um combinado de boca</a>
       </section>
 
-      <div class="opcoes">
-        <a class="opcao" href="#/combinado">
-          <span class="ic">${I('lapis')}</span>
-          <span class="textos"><span class="t-sub">Anotar um combinado de boca</span><span class="auxiliar">Deixe por escrito o que foi falado, para ninguém esquecer.</span></span>
-          ${I('seta')}
-        </a>
+      ${fluxo.fotos.length ? `<a class="cartao alerta linha" href="#/entender/foto" style="text-decoration:none;color:var(--c-texto);padding:var(--s2) var(--s3)">${I('foto')}<span class="corpo" style="flex:1"><strong>Você tem ${fluxo.fotos.length === 1 ? 'uma foto esperando' : fluxo.fotos.length + ' fotos esperando'}</strong> para ser lida. Toque para continuar.</span>${I('seta')}</a>` : ''}
+
+      <div class="ajustes-rapidos" aria-label="Deixe do seu jeito">
+        ${controleLetra()}
+        ${chaveTema()}
+      </div>
+
+      <div class="opcoes grade-2">
         <a class="opcao" href="#/guia">
           <span class="ic">${I('guia')}</span>
           <span class="textos"><span class="t-sub">Como usar o app</span><span class="auxiliar">Passo a passo, com áudio.</span></span>
@@ -249,11 +272,14 @@
       ${pendentes ? `<a class="cartao suave linha" href="#/perguntas" style="text-decoration:none;color:var(--c-texto);padding:var(--s2) var(--s3)">${I('balao')}<span class="corpo" style="flex:1"><strong>Você tem ${pendentes} ${pendentes === 1 ? 'pergunta guardada' : 'perguntas guardadas'}</strong> para fazer.</span>${I('seta')}</a>` : ''}
 
       <section class="grupo" aria-labelledby="t-recentes">
-        <div class="linha fim"><h2 id="t-recentes">Papéis recentes</h2>${estado.papeis.length > 3 ? '<a class="botao texto" href="#/papeis">Ver todos</a>' : ''}</div>
-        ${recentes.length ? recentes.map(itemPapel).join('') : `
+        <div class="grupo-justo">
+          <div class="linha fim"><h2 id="t-recentes">Papéis que você já leu</h2>${estado.papeis.length > 3 ? '<a class="botao texto" href="#/papeis">Ver todos</a>' : ''}</div>
+          ${recentes.length ? '<p class="auxiliar">Toque em um papel para ver a explicação de novo.</p>' : ''}
+        </div>
+        ${recentes.length ? `<div class="lista-grade">${recentes.map(itemPapel).join('')}</div>` : `
           <div class="cartao contorno">
-            <p class="corpo">Ainda não tem nenhum papel aqui. Quer ver como funciona? Toque em um exemplo:</p>
-            ${D.EXEMPLOS.map((e) => `<button type="button" class="opcao" data-acao="exemplo" data-chave="${e.chave}"><span class="ic">${I('papel')}</span><span class="textos"><span class="t-sub">${esc(e.descricao)}</span><span class="pequeno">Exemplo inventado, só para treinar</span></span>${I('seta')}</button>`).join('')}
+            <p class="corpo">Você ainda não leu nenhum papel. Quando ler, ele aparece aqui. Quer treinar antes? Toque em um exemplo. Ele não fica guardado.</p>
+            ${D.EXEMPLOS.map((e) => `<button type="button" class="opcao" data-acao="exemplo" data-chave="${e.chave}"><span class="ic">${I('papel')}</span><span class="textos"><span class="t-sub">Exemplo: ${esc(e.descricao.charAt(0).toLowerCase() + e.descricao.slice(1))}</span><span class="pequeno">Exemplo inventado, só para treinar</span></span>${I('seta')}</button>`).join('')}
           </div>`}
       </section>
 
@@ -261,6 +287,18 @@
 
       <a class="botao texto" href="#/ajuda#seus-dados" style="align-self:center">${I('cadeado')}Quem está por trás e os seus dados</a>`,
     };
+  }
+
+  /* Tamanho da letra sempre à mão (M01, M02) */
+  function controleLetra() {
+    const atual = estado.config.letra || 'normal';
+    const b = (valor, rot, tam, nome) => `<button type="button" class="seg-botao" role="radio" aria-checked="${atual === valor}" aria-label="Letra ${nome}" data-acao="letra" data-valor="${valor}"><span style="font-size:${tam}">${rot}</span></button>`;
+    return `<div class="controle-letra">
+      <span class="textos"><span class="t-sub">Tamanho da letra</span></span>
+      <div class="segmentado" role="radiogroup" aria-label="Tamanho da letra">
+        ${b('normal', 'A', '1rem', 'normal')}${b('grande', 'A+', '1.25rem', 'grande')}${b('muito-grande', 'A++', '1.5rem', 'muito grande')}
+      </div>
+    </div>`;
   }
 
   function chaveTema() {
@@ -284,6 +322,10 @@
   function telaEntender() {
     fluxo.ativo = true;
     const p = estado.config.papel;
+    // A6: quem já respondeu vai direto para a foto (só ao entrar na tela, não ao tocar numa opção)
+    if (p && !fluxo.trocarPapel && !fluxo.escolhendoPapel) { fluxo.pulouPapel = true; location.replace('#/entender/foto'); return null; }
+    fluxo.escolhendoPapel = true;
+    fluxo.pulouPapel = false;
     const opc = (valor, icone, titulo, sub) => `
       <button type="button" class="opcao" role="radio" aria-checked="${p === valor}" data-acao="escolher-papel" data-valor="${valor}">
         <span class="ic">${I(icone)}</span>
@@ -326,7 +368,7 @@
       return {
         semAbas: true,
         html: `
-        ${cabecalho('#/entender', 'Voltar')}
+        ${cabecalho('#/inicio', 'Cancelar')}
         ${etapas(1)}
         <div class="grupo-justo">
           <h1>A foto ficou boa?</h1>
@@ -348,31 +390,63 @@
         ${inputsFoto()}`,
       };
     }
+    const PAPEL_TXT = { usa: 'quem usa a terra', cede: 'quem é dono da terra', outro: 'outro tipo de papel' }[estado.config.papel];
     return {
       semAbas: true,
       html: `
-      ${cabecalho('#/entender', 'Voltar')}
+      ${cabecalho('#/inicio', 'Cancelar')}
       ${etapas(1)}
       <div class="grupo-justo">
         <h1>Tire a foto do papel</h1>
-        <p class="leitura">Faça assim, um passo de cada vez:</p>
+        <p class="auxiliar linha" style="gap:var(--s1);flex-wrap:wrap">Você é: <strong>${PAPEL_TXT}</strong> <button type="button" class="botao texto" data-acao="trocar-papel" style="min-height:2.75rem;padding:0 var(--s1)">${I('lapis', 18)}Trocar</button></p>
       </div>
-      <div class="cartao">
-        ${instrucoes(PASSOS_FOTO)}
-        ${ouvir('dicas-foto', 'Como tirar a foto. ' + textoDe(PASSOS_FOTO), 'Ouvir os passos')}
+      ${ehComputador() ? `
+      <div class="grupo botoes-linha">
+        <button type="button" class="botao destaque" data-acao="abrir-galeria">${I('foto')}Escolher a foto do papel</button>
+        <a class="botao secundario" href="#/entender/texto">${I('prancheta')}Colar o texto</a>
       </div>
-      <p class="cartao suave linha" style="padding:var(--s2) var(--s3)">${I('cadeado')}<span class="corpo" style="flex:1">A foto fica só no seu celular. Ela não é mandada para ninguém.</span></p>
+      <div class="cartao contorno linha-topo">${I('info')}<p class="corpo" style="flex:1">Está no computador? Tire a foto com o celular, mande para o computador (por exemplo, pelo WhatsApp Web) e escolha o arquivo aqui. Ou cole o texto do papel.</p></div>` : `
       <div class="grupo">
         <button type="button" class="botao destaque" data-acao="abrir-camera">${I('camera')}Abrir câmera</button>
         <button type="button" class="botao secundario" data-acao="abrir-galeria">${I('foto')}Escolher foto da galeria</button>
-      </div>
+      </div>`}
+      <details class="acordeao" ${estado.papeis.length ? '' : 'open'}>
+        <summary><span class="ic">${I('sol')}</span><span class="t-sub">Dicas para a foto sair boa</span><span class="seta-acordeao">${I('abaixo')}</span></summary>
+        <div class="corpo-acordeao">
+          ${instrucoes(PASSOS_FOTO)}
+          <div class="acoes">${ouvir('dicas-foto', 'Como tirar a foto. ' + textoDe(PASSOS_FOTO), 'Ouvir os passos')}</div>
+        </div>
+      </details>
+      ${blocoPrivacidade()}
       <div class="grupo">
         <h2>Outras formas</h2>
+        <a class="opcao" href="#/combinado"><span class="ic">${I('lapis')}</span><span class="textos"><span class="t-sub">Não tem papel? O combinado foi de boca?</span><span class="auxiliar">Anote o que foi falado e mande para a outra pessoa conferir.</span></span>${I('seta')}</a>
         <a class="opcao" href="#/entender/texto"><span class="ic">${I('prancheta')}</span><span class="textos"><span class="t-sub">Colar ou digitar o texto</span><span class="auxiliar">Se alguém mandou o texto do papel por mensagem.</span></span>${I('seta')}</a>
-        ${D.EXEMPLOS.map((e) => `<button type="button" class="opcao" data-acao="exemplo" data-chave="${e.chave}"><span class="ic">${I('papel')}</span><span class="textos"><span class="t-sub">Testar com um exemplo</span><span class="auxiliar">${esc(e.descricao)}</span></span>${I('seta')}</button>`).join('')}
+        ${D.EXEMPLOS.map((e) => `<button type="button" class="opcao" data-acao="exemplo" data-chave="${e.chave}"><span class="ic">${I('papel')}</span><span class="textos"><span class="t-sub">Exemplo: ${esc(e.descricao.charAt(0).toLowerCase() + e.descricao.slice(1))}</span><span class="auxiliar">Exemplo inventado, só para treinar</span></span>${I('seta')}</button>`).join('')}
       </div>
       ${inputsFoto()}`,
     };
+  }
+  /* Antes da foto: quem fez o app, o que acontece com a foto, quem vê, quanto tempo, como apagar e internet (M07, M14) */
+  function blocoPrivacidade() {
+    const itens = [
+      ['escudo', 'Quem fez o app', 'Estudantes de Design Digital da FIAP. Não é do dono da terra, do banco nem de empresa.'],
+      ['celular', 'O que acontece com a foto', 'A foto é lida aqui no seu aparelho. Ela não é enviada pela internet e não fica guardada.'],
+      ['olho', 'Quem vê', 'Ninguém. Só você, a não ser que você mesmo mande para alguém.'],
+      ['cadeado', 'Inteligência artificial', 'A foto e o texto não são usados para treinar inteligência artificial.'],
+      ['relogio', 'Por quanto tempo', 'Só o texto lido fica guardado neste aparelho, até você apagar. Se limpar o navegador ou trocar de celular, ele some. Para ter uma cópia, mande para você mesmo no WhatsApp.'],
+      ['lixeira', 'Como apagar', 'Em Papéis, abra o papel e toque em Excluir. Ou em Ajustes › Seus dados › Apagar tudo.'],
+      ['sem-sinal', 'Internet', A.leitorPronto() ? 'O leitor de letras já está no aparelho. Ler a foto não gasta internet.' : 'Na primeira leitura, o app baixa o leitor de letras uma vez só (alguns MB). Depois, ler papéis não gasta internet.'],
+    ];
+    return `<section class="cartao suave" aria-labelledby="t-priv">
+      <h2 id="t-priv">Antes de tirar a foto</h2>
+      <ul class="lista-info">${[itens[0], itens[1], itens[6]].map(([ic, t, d]) => `<li><span class="ic">${I(ic)}</span><span class="textos"><span class="t-sub">${t}</span><span class="corpo">${d}</span></span></li>`).join('')}</ul>
+      <details class="mais-info">
+        <summary>${I('abaixo', 20)}<span>Quem vê, por quanto tempo e como apagar</span></summary>
+        <ul class="lista-info">${[itens[2], itens[3], itens[4], itens[5]].map(([ic, t, d]) => `<li><span class="ic">${I(ic)}</span><span class="textos"><span class="t-sub">${t}</span><span class="corpo">${d}</span></span></li>`).join('')}</ul>
+      </details>
+      ${ouvir('privacidade', 'Antes de tirar a foto. ' + itens.map(([, t, d]) => t + ': ' + d).join(' '))}
+    </section>`;
   }
   const inputsFoto = () => `
     <input type="file" accept="image/*" capture="environment" id="in-camera" class="sr" tabindex="-1" aria-hidden="true">
@@ -395,6 +469,7 @@
       </div>
       <div class="campo">
         <label for="campo-texto">Texto do papel</label>
+<p class="pequeno linha" style="gap:var(--s1)">${I('som', 18)}Dica: toque no microfone do teclado para falar em vez de escrever.</p>
         <textarea id="campo-texto" rows="8" placeholder="Cole aqui o texto do contrato">${esc(fluxo.texto)}</textarea>
         <span class="erro" id="erro-texto" hidden>${I('alerta')}O texto está muito curto. Cole o papel inteiro.</span>
       </div>
@@ -413,16 +488,17 @@
       <div class="grupo centro" style="text-align:center">
         <span class="ic verde grande pulsando">${I('papel', 56)}</span>
         <h1>Lendo o seu papel…</h1>
-        <p class="leitura">Isso pode levar até 1 minuto. Pode deixar o celular parado.</p>
+        <p class="leitura">Isso pode levar até 1 minuto. Pode deixar o celular parado. Depois, você confere o que o app leu e vê a explicação.</p>
       </div>
       <div class="cartao" aria-live="polite">
         <div class="barra" role="progressbar" aria-label="Andamento da leitura" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="barra"></span></div>
         <ul class="grupo" style="list-style:none;padding:0;margin:0" id="etapas-leitura">
-          ${[['preparando', 'Preparando a foto'], ['baixando', 'Baixando o leitor de letras (só na primeira vez)'], ['lendo', 'Lendo as letras'], ['explicando', 'Explicando em palavras simples']]
+          ${[['preparando', 'Preparando a foto'], ['baixando', 'Baixando o leitor de letras (só na primeira vez)'], ['lendo', 'Lendo as letras'], ['explicando', 'Separando valores, datas e prazos']]
+            .filter(([k]) => !(k === 'baixando' && (fluxo.exemplo || fluxo.texto || A.leitorPronto())))
             .map(([k, t]) => `<li class="linha corpo" data-etapa="${k}" style="color:var(--c-texto-2)">${I('circulo', 28)}<span>${t}</span></li>`).join('')}
         </ul>
       </div>
-      <p class="auxiliar centro" style="text-align:center">Na primeira vez, o app baixa o leitor de letras (alguns MB). Se puder, use o Wi-Fi de casa. Depois, funciona sem gastar dados de novo.</p>
+      ${fluxo.fotos.length && !A.leitorPronto() ? '<p class="auxiliar centro" style="text-align:center">Na primeira vez, o app baixa o leitor de letras (alguns MB). Depois, ler não gasta internet. A foto não é enviada.</p>' : ''}
       <button type="button" class="botao secundario" data-acao="cancelar-leitura">${I('fechar')}Cancelar</button>`,
       montar: iniciarLeitura,
     };
@@ -437,7 +513,7 @@
       const agora = i === idx;
       li.style.color = feito ? 'var(--c-texto)' : agora ? 'var(--c-acento)' : 'var(--c-texto-2)';
       li.style.fontWeight = agora ? '500' : '400';
-      li.querySelector('svg').outerHTML = I(feito ? 'circulo-certo' : agora ? 'relogio' : 'circulo', 28);
+      const svg = li.querySelector('svg'); if (svg) svg.outerHTML = I(feito ? 'circulo-certo' : agora ? 'relogio' : 'circulo', 28);
     });
     const total = Math.round(((idx + (progresso || 0)) / ordem.length) * 100);
     const barra = document.getElementById('barra');
@@ -474,14 +550,9 @@
       if (!location.hash.startsWith('#/entender/lendo')) return; // a pessoa saiu da tela
       atualizarLeitura('explicando', 0.5);
       await esperar(400);
-      const analise = A.analisar(texto, estado.config.papel);
-      const doc = { id: novoId(), criadoEm: new Date().toISOString(), papel: estado.config.papel, origem, analise };
-      estado.papeis.unshift(doc);
-      salvar('papeis');
-      limparFluxo();
-      resultadoDoFluxo = doc.id;
-      avisar('Pronto! O papel foi guardado em Papéis.');
-      location.replace('#/resultado/' + doc.id);
+      fluxo.lido = texto;
+      fluxo.origem = origem;
+      location.replace('#/entender/conferir');
     } catch (e) {
       if (e && e.message === 'cancelado') return;
       leituraErro = e && e.message === 'foto-ruim' ? 'foto-ruim' : !navigator.onLine || (e && e.message === 'sem-internet') ? 'sem-internet' : 'geral';
@@ -534,12 +605,122 @@
     fluxo.fotos = [];
     fluxo.texto = '';
     fluxo.exemplo = null;
+    fluxo.lido = null;
+    fluxo.origem = null;
+    fluxo.editandoId = null;
+    fluxo.correcoes = {};
+    fluxo.editandoFato = null;
+    fluxo.textoEditado = null;
     leituraErro = null;
+  }
+
+  /* Lista dos fatos principais: valor, prazo, datas, quem paga (M11).
+     Na etapa Conferir, cada item pode ser corrigido sozinho (A4). */
+  const EXEMPLO_FATO = { Valor: 'Ex.: R$ 6.000 por ano', 'Divisão': 'Ex.: metade para cada um', Prazo: 'Ex.: 3 anos, de março de 2027 a março de 2030', 'Pagar até': 'Ex.: 15 de maio de 2027', 'Datas de pagamento': 'Ex.: 30 de junho e 30 de dezembro', 'Assinado em': 'Ex.: 9 de julho de 2017', 'Quem paga': 'Ex.: quem usa a terra paga luz e água' };
+  function fatosHtml(fatos, conferir, editavel) {
+    return `<ul class="fatos">${(fatos || []).map((f, i) => {
+      const editando = editavel && fluxo.editandoFato === f.rotulo;
+      return `
+      <li class="${f.valor ? '' : 'sem'}">
+        <span class="ic">${I(f.icone)}</span>
+        <span class="textos"><span class="fato-rotulo">${esc(f.rotulo)}${f.corrigido ? ' · corrigido por você' : ''}</span>
+        ${editando ? `
+          <span class="campo">
+            <label for="fato-${i}" class="sr">${esc(f.rotulo)}</label>
+            <input id="fato-${i}" data-fato="${esc(f.rotulo)}" value="${esc(f.valor || '')}" placeholder="${esc(EXEMPLO_FATO[f.rotulo] || 'Escreva como está no papel')}" autocomplete="off">
+            <span class="pequeno">Dica: toque no microfone do teclado para falar.</span>
+          </span>
+          <span class="linha" style="gap:var(--s1);flex-wrap:wrap">
+            <button type="button" class="botao primario auto" data-acao="salvar-fato" data-rotulo="${esc(f.rotulo)}" style="min-height:3rem">${I('certo')}Salvar</button>
+            <button type="button" class="botao texto" data-acao="cancelar-fato" style="min-height:3rem">Cancelar</button>
+          </span>` : `
+        <span class="fato-valor">${f.valor ? esc(f.valor) : 'Não achamos no texto lido'}</span>
+        ${!f.valor && conferir ? '<span class="pequeno">Confira no papel. Pode estar escrito e a leitura não ter pegado.</span>' : ''}
+        ${editavel ? `<button type="button" class="botao-ouvir contorno" data-acao="editar-fato" data-rotulo="${esc(f.rotulo)}">${I('lapis', 18)}<span>${f.valor ? 'Está errado' : 'Escrever como está no papel'}</span></button>` : ''}`}
+        </span>
+      </li>`;
+    }).join('')}</ul>`;
+  }
+
+  /* Aplica as correções que a pessoa fez nos fatos principais */
+  function aplicarCorrecoes(an, correcoes) {
+    const c = correcoes || {};
+    if (!Object.keys(c).length) return an;
+    const PONTO = { Valor: 'valor', 'Divisão': 'valor', Prazo: 'prazo', 'Pagar até': 'prazo', 'Assinado em': 'datas', 'Quem paga': 'paga' };
+    an.fatos.forEach((f) => { if (c[f.rotulo]) { f.valor = c[f.rotulo]; f.corrigido = true; } });
+    Object.keys(c).forEach((rot) => {
+      if (!an.fatos.some((f) => f.rotulo === rot)) an.fatos.push({ icone: 'calendario', rotulo: rot, valor: c[rot], corrigido: true });
+      const p = an.pontos.find((x) => x.id === PONTO[rot]);
+      if (!p) return;
+      const nota = rot === 'Assinado em' ? `Você informou que o papel foi assinado em ${c[rot]}.` : `Você informou: ${c[rot]}.`;
+      if (p.faltando || p.conferir) { p.texto = nota; p.faltando = false; p.conferir = false; p.pergunta = undefined; }
+      else p.texto = nota + ' ' + p.texto;
+    });
+    an.resumo += ' Algumas informações foram corrigidas por você.';
+    return an;
+  }
+
+  /* ---------- Passo 3: conferir o que o app leu (M06, M10, M16) ---------- */
+  function telaConferir() {
+    const prev = aplicarCorrecoes(A.analisar(fluxo.textoEditado != null ? fluxo.textoEditado : fluxo.lido, estado.config.papel), fluxo.correcoes);
+    const deFoto = fluxo.origem === 'foto';
+    const achados = prev.fatos.filter((f) => f.valor).length;
+    const PASSOS = [
+      'Olhe a lista: valor, prazo, datas e quem paga.',
+      ['Compare com o papel que está na sua mão.', 'A leitura da foto pode trocar ou pular letras e números.'],
+      ['Se algo estiver errado ou faltando, toque em <strong>Está errado</strong> ou <strong>Escrever como está no papel</strong>, no próprio item.', 'Você corrige só aquela informação, sem mexer no resto.'],
+      'Se estiver certo, toque em <strong>Está certo, ver a explicação</strong>.',
+    ];
+    return {
+      semAbas: true,
+      html: `
+      ${cabecalho(fluxo.editandoId ? '#/resultado/' + fluxo.editandoId : deFoto ? '#/entender/foto' : '#/entender', 'Voltar')}
+      ${fluxo.editandoId ? '' : etapas(2)}
+      <div class="grupo-justo">
+        <span class="selo">${I('circulo-certo', 18)}${fluxo.editandoId ? 'Corrigir a leitura' : 'Leitura pronta'}</span>
+        <h1>Confira o que o app leu</h1>
+        <p class="leitura">Antes da explicação, veja se o app leu certo. ${achados ? `Encontramos ${achados} ${achados === 1 ? 'informação principal' : 'informações principais'}.` : 'Não achamos as informações principais.'}</p>
+      </div>
+      ${ouvir('conferir-leitura', 'Confira o que o app leu. ' + prev.fatos.map((f) => `${f.rotulo}: ${f.valor || 'não achamos no texto lido'}`).join('. ') + '. ' + textoDe(PASSOS))}
+      <section class="cartao" aria-labelledby="t-achamos">
+        <h2 id="t-achamos">O que encontramos</h2>
+        ${fatosHtml(prev.fatos, true, true)}
+      </section>
+      <section class="cartao contorno" aria-labelledby="t-como-conferir">
+        <h2 id="t-como-conferir">Como conferir</h2>
+        ${instrucoes(PASSOS)}
+      </section>
+      <details class="acordeao" id="caixa-texto" ${fluxo.editandoId ? 'open' : ''}>
+        <summary><span class="ic">${I('lapis')}</span><span class="t-sub">Ver e corrigir o texto inteiro</span><span class="seta-acordeao">${I('abaixo')}</span></summary>
+        <div class="corpo-acordeao">
+          <div class="campo">
+            <label for="texto-lido">Texto que o app leu</label>
+            <p class="auxiliar">Toque na parte errada e corrija. Por exemplo, uma data ou um valor.</p>
+<p class="pequeno linha" style="gap:var(--s1)">${I('som', 18)}Dica: toque no microfone do teclado para falar em vez de escrever.</p>
+            <textarea id="texto-lido" rows="10">${esc(fluxo.textoEditado != null ? fluxo.textoEditado : fluxo.lido)}</textarea>
+          </div>
+        </div>
+      </details>
+      <div class="grupo">
+        <button type="button" class="botao destaque" data-acao="confirmar-leitura">${I('certo')}Está certo, ver a explicação</button>
+        ${deFoto && !fluxo.editandoId ? `<button type="button" class="botao secundario" data-acao="refazer-fotos">${I('camera')}Tirar outra foto</button>` : ''}
+        <a class="botao texto" href="${fluxo.editandoId ? '#/resultado/' + fluxo.editandoId : '#/inicio'}" style="align-self:center">Cancelar</a>
+      </div>`,
+      montar: () => {
+        const t = document.getElementById('texto-lido');
+        if (t) t.addEventListener('input', () => { fluxo.textoEditado = t.value; });
+        const f = tela.querySelector('input[data-fato]');
+        if (f) {
+          f.focus();
+          f.addEventListener('keydown', (e) => { if (e.key === 'Enter') acoes['salvar-fato'](f); });
+        }
+      },
+    };
   }
 
   /* ---------- Passo 4: explicação ---------- */
   function telaResultado(id) {
-    const doc = estado.papeis.find((p) => p.id === id);
+    const doc = acharDoc(id);
     if (!doc) return telaNaoAchou();
     const an = doc.analise;
     const veioDoFluxo = resultadoDoFluxo === id;
@@ -555,22 +736,32 @@
       'Mande para alguém de confiança antes de decidir.',
     ];
 
-    const chip = (p) => p.alerta ? `<span class="selo alto">${I('alerta', 18)}Atenção</span>` : p.faltando ? `<span class="selo medio">${I('info', 18)}Não está no papel</span>` : `<span class="selo">${I('certo', 18)}Está no papel</span>`;
+    const chip = (p) => p.alerta ? `<span class="selo alto">${I('alerta', 18)}Atenção</span>` : p.faltando ? `<span class="selo medio">${I('info', 18)}Não achamos no texto</span>` : p.conferir ? `<span class="selo medio">${I('olho', 18)}Confira no papel</span>` : `<span class="selo">${I('certo', 18)}Achamos no papel</span>`;
 
-    const partes = an.pontos.map((p, i) => {
-      const audio = `${p.titulo}. ${p.texto} ${p.alerta || ''} ${p.pergunta ? 'Pergunta para fazer: ' + p.pergunta : ''}`;
-      return `
+    const PASSOS_AGORA = [
+      'Guarde as perguntas que você quer fazer.',
+      ['Mande a explicação para alguém de confiança.', 'Assim vocês conversam e decidem juntos.'],
+      'Leve o papel e as perguntas na conversa com a outra pessoa do acordo.',
+      ['Se algo pesar, procure ajuda antes de assinar.', 'Sindicato, técnico, cartório ou Defensoria Pública.'],
+    ];
+    const comAtencao = [];
+    const semAtencao = [];
+    an.pontos.forEach((p, i) => {
+      const audio = `${p.titulo}. ${p.texto} ${p.alerta || ''} ${p.pergunta ? 'Pergunta para levar à conversa: ' + p.pergunta : ''}`;
+      const html = `
       <details class="acordeao" ${p.alerta ? 'open' : ''}>
         <summary><span class="ic">${I(p.icone)}</span><span class="grupo-justo" style="flex:1"><span class="t-sub" style="color:var(--c-acento);font-size:1.25rem">${esc(p.titulo)}</span>${chip(p)}</span><span class="seta-acordeao">${I('abaixo')}</span></summary>
         <div class="corpo-acordeao">
           <p class="leitura">${esc(p.texto)}</p>
+          ${p.faltando && p.id !== 'datas' ? '<p class="auxiliar">Confira no papel: pode estar escrito e a leitura não ter pegado.</p>' : ''}
           ${p.alerta ? `<div class="cartao alerta linha-topo" style="padding:var(--s2) var(--s3)">${I('alerta')}<p class="corpo" style="flex:1">${esc(p.alerta)}</p></div>` : ''}
           ${(p.trechos || []).length ? `<div class="grupo-justo"><p class="pequeno"><strong>No papel está assim:</strong></p>${p.trechos.slice(0, 2).map((t) => `<blockquote class="trecho" style="margin:0">${esc(t)}</blockquote>`).join('')}</div>` : ''}
-          ${p.pergunta ? `<div class="grupo-justo"><p class="pequeno"><strong>Pergunta para fazer:</strong></p><p class="leitura">“${esc(p.pergunta)}”</p>${botaoGuardar(p.pergunta, doc)}</div>` : ''}
+          ${p.pergunta ? `<div class="grupo-justo"><p class="pequeno"><strong>Pergunta para levar à conversa:</strong></p><p class="leitura">“${esc(p.pergunta)}”</p>${botaoGuardar(p.pergunta, doc)}</div>` : ''}
           <div class="acoes">${ouvir(`r-${doc.id}-${i}`, audio)}</div>
         </div>
       </details>`;
-    }).join('');
+      (p.alerta ? comAtencao : semAtencao).push(html);
+    });
 
     const textoTudo = [
       an.resumo,
@@ -579,17 +770,20 @@
     ].join(' ');
 
     return {
+      aba: 'papeis',
       semAbas: veioDoFluxo,
       html: `
       ${cabecalho(veioDoFluxo ? '#/inicio' : '#/papeis', veioDoFluxo ? 'Início' : 'Voltar', `<button type="button" class="botao-icone" data-acao="compartilhar-papel" data-id="${doc.id}" aria-label="Mandar a explicação">${I('enviar')}</button>`)}
       ${veioDoFluxo ? etapas(3) : ''}
-      ${doc.origem === 'exemplo' ? `<p class="cartao suave linha" style="padding:var(--s2) var(--s3)">${I('info')}<span class="corpo" style="flex:1">Este é um exemplo inventado, só para treinar. Os nomes e valores não são de verdade.</span></p>` : ''}
+      ${doc.origem === 'exemplo' ? `<p class="cartao suave linha" style="padding:var(--s2) var(--s3)">${I('info')}<span class="corpo" style="flex:1">Este é um exemplo inventado, só para treinar. Os nomes e valores não são de verdade, e ele não fica guardado em Papéis.</span></p>` : ''}
 
       <div class="grupo-justo">
         ${selo(an.nivel)}
         <h1>${esc(an.tipoNome)}</h1>
-        <p class="auxiliar">Lido em ${data(doc.criadoEm)}${papelTxt ? ` · explicado para ${papelTxt}` : ''}</p>
+        <p class="auxiliar">Lido em ${data(doc.criadoEm)}${papelTxt ? ` · explicado para ${papelTxt}` : ''}${doc.corrigido ? ' · texto corrigido por você' : ''}</p>
       </div>
+
+      <div class="cartao contorno linha-topo" role="note">${I('info')}<p class="corpo" style="flex:1"><strong>É uma explicação para ajudar, não uma decisão.</strong> A leitura pode errar: confira valores e datas no papel. Se o assunto pesar, converse com um profissional.</p></div>
 
       <section class="cartao" aria-labelledby="t-resumo">
         <h2 id="t-resumo">Em poucas palavras</h2>
@@ -597,21 +791,56 @@
         ${ouvir('tudo-' + doc.id, textoTudo, 'Ouvir a explicação inteira', true)}
       </section>
 
-      <details class="acordeao">
-        <summary><span class="ic verde">${I('guia')}</span><span class="t-sub">Como ler esta explicação</span><span class="seta-acordeao">${I('abaixo')}</span></summary>
-        <div class="corpo-acordeao">${instrucoes(PASSOS_LER)}${ouvir('como-ler', 'Como ler esta explicação. ' + textoDe(PASSOS_LER))}</div>
-      </details>
+      <button type="button" class="botao secundario" data-acao="compartilhar-papel" data-id="${doc.id}">${I('enviar')}Mandar para alguém de confiança</button>
+
+      ${(an.fatos || []).length ? `<section class="cartao" aria-labelledby="t-fatos">
+        <h2 id="t-fatos">Valores, datas e prazos</h2>
+        <p class="auxiliar">O mais importante do papel, em destaque.</p>
+        ${fatosHtml(an.fatos, doc.origem === 'foto')}
+        <div class="acoes">${ouvir('fatos-' + doc.id, 'Valores, datas e prazos. ' + an.fatos.map((f) => `${f.rotulo}: ${f.valor || 'não achamos no texto lido'}`).join('. '))}</div>
+      </section>` : ''}
 
       <section class="grupo" aria-labelledby="t-partes">
         <div class="grupo-justo">
-          <h2 id="t-partes">As partes que pesam</h2>
-          <p class="auxiliar">Toque em cada parte para abrir. As que pedem atenção já estão abertas.</p>
+          <h2 id="t-partes">${comAtencao.length ? `O que pede atenção (${comAtencao.length})` : 'As partes do papel'}</h2>
+          <p class="auxiliar">${comAtencao.length ? 'Comece por aqui. É onde o papel pode pesar para você.' : 'Não achamos nenhum ponto muito preocupante. Toque em cada parte para conferir.'}</p>
         </div>
-        ${partes}
+        ${comAtencao.length ? comAtencao.join('') : semAtencao.join('')}
+        ${comAtencao.length && semAtencao.length ? `
+        <details class="acordeao">
+          <summary><span class="ic">${I('papel')}</span><span class="t-sub">Outras partes do papel (${semAtencao.length})</span><span class="seta-acordeao">${I('abaixo')}</span></summary>
+          <div class="corpo-acordeao">${semAtencao.join('')}</div>
+        </details>` : ''}
+      </section>
+
+      <section class="cartao" aria-labelledby="t-perguntas">
+        <h2 id="t-perguntas">Perguntas para levar à conversa</h2>
+        <p class="corpo">Estas não são respostas do app. São perguntas para <strong>você fazer</strong> à outra pessoa do acordo, ao banco ou a quem fez o papel. ${ehTerra ? 'Perguntar não é desconfiança: é cuidar do combinado dos dois lados.' : ''}</p>
+        <ul class="lista-dividida">${an.perguntas.map((q) => `<li><p class="leitura">“${esc(q)}”</p>${botaoGuardar(q, doc)}</li>`).join('')}</ul>
+        ${ouvir('perg-' + doc.id, 'Perguntas para levar à conversa. ' + an.perguntas.join(' '))}
+      </section>
+
+      <section class="cartao escuro" aria-labelledby="t-ajuda">
+        <div class="linha"><span class="ic claro">${I('pessoas')}</span><h2 id="t-ajuda" class="t-secao claro">Quando buscar ajuda</h2></div>
+        <ul class="grupo" style="margin:0;padding-left:var(--s3)">${an.quando.map((q) => `<li class="leitura claro">${esc(q)}</li>`).join('')}</ul>
+        <h3 class="claro">Quem pode ajudar</h3>
+        ${D.QUEM_AJUDA.slice(0, 3).map((q) => `<div class="grupo-justo" style="background:var(--c-forte-suave);border-radius:var(--r-m);padding:var(--s2) var(--s3)"><strong class="claro">${esc(q.nome)}</strong><span class="corpo claro">${esc(q.texto)}</span></div>`).join('')}
+        ${ouvir('ajuda-' + doc.id, 'Quando buscar ajuda. ' + an.quando.join(' ') + ' Quem pode ajudar: ' + D.QUEM_AJUDA.slice(0, 3).map((q) => q.nome + '. ' + q.texto).join(' '))}
+        <a class="botao claro-sec" href="#/ajuda">Ver todos e como encontrar</a>
+      </section>
+
+      <section class="cartao contorno" aria-labelledby="t-agora">
+        <h2 id="t-agora">E agora?</h2>
+        ${instrucoes(PASSOS_AGORA)}
+        <div class="acoes">${ouvir('agora-' + doc.id, 'E agora? ' + textoDe(PASSOS_AGORA))}</div>
       </section>
 
       <section class="grupo" aria-labelledby="t-mais">
         <h2 id="t-mais">Para entender melhor</h2>
+        <details class="acordeao">
+          <summary><span class="ic verde">${I('guia')}</span><span class="t-sub">Como ler esta explicação</span><span class="seta-acordeao">${I('abaixo')}</span></summary>
+          <div class="corpo-acordeao">${instrucoes(PASSOS_LER)}${ouvir('como-ler', 'Como ler esta explicação. ' + textoDe(PASSOS_LER))}</div>
+        </details>
         <details class="acordeao">
           <summary><span class="ic">${I('papel')}</span><span class="t-sub">O que é este papel</span><span class="seta-acordeao">${I('abaixo')}</span></summary>
           <div class="corpo-acordeao">
@@ -620,6 +849,15 @@
             ${ouvir('oque-' + doc.id, an.oQueE + ' ' + an.lei.join(' '))}
           </div>
         </details>
+        ${(an.valorJusto || []).length ? `
+        <details class="acordeao">
+          <summary><span class="ic">${I('balanca')}</span><span class="t-sub">O valor é justo?</span><span class="seta-acordeao">${I('abaixo')}</span></summary>
+          <div class="corpo-acordeao">
+            <p class="leitura">Para saber se o valor é justo, compare com quem conhece a sua região:</p>
+            ${instrucoes(an.valorJusto)}
+            <div class="acoes">${ouvir('justo-' + doc.id, 'O valor é justo? ' + textoDe(an.valorJusto))}</div>
+          </div>
+        </details>` : ''}
         ${an.palavras.length ? `
         <details class="acordeao">
           <summary><span class="ic">${I('guia')}</span><span class="t-sub">Palavras difíceis (${an.palavras.length})</span><span class="seta-acordeao">${I('abaixo')}</span></summary>
@@ -629,32 +867,31 @@
           </div>
         </details>` : ''}
         <details class="acordeao">
-          <summary><span class="ic">${I('olho')}</span><span class="t-sub">Ver o texto que o app leu</span><span class="seta-acordeao">${I('abaixo')}</span></summary>
-          <div class="corpo-acordeao"><p class="corpo" style="white-space:pre-wrap">${esc(an.texto)}</p><p class="pequeno">Se o texto estiver muito diferente do papel, tire a foto de novo com mais luz.</p></div>
+          <summary><span class="ic">${I('olho')}</span><span class="t-sub">Conferir o texto que o app leu</span><span class="seta-acordeao">${I('abaixo')}</span></summary>
+          <div class="corpo-acordeao">
+            <p class="corpo" style="white-space:pre-wrap">${esc(an.texto)}</p>
+            <p class="auxiliar">Se alguma parte estiver diferente do papel, corrija o texto e veja a explicação de novo.</p>
+            <div class="acoes"><button type="button" class="botao secundario" data-acao="corrigir-doc" data-id="${doc.id}">${I('lapis')}Corrigir o texto</button></div>
+          </div>
+        </details>
+        <details class="acordeao">
+          <summary><span class="ic">${I('prancheta')}</span><span class="t-sub">Ler a explicação inteira em texto</span><span class="seta-acordeao">${I('abaixo')}</span></summary>
+          <div class="corpo-acordeao">
+            <p class="corpo" style="white-space:pre-wrap">${esc(textoCompartilhar(doc).replace(/\*/g, ''))}</p>
+            <div class="acoes"><button type="button" class="botao secundario" data-acao="copiar-explicacao" data-id="${doc.id}">${I('copiar')}Copiar o texto</button></div>
+          </div>
         </details>
       </section>
 
-      <section class="cartao" aria-labelledby="t-perguntas">
-        <h2 id="t-perguntas">Perguntas para fazer</h2>
-        <p class="corpo">${ehTerra ? 'São perguntas que todo mundo faz antes de fechar um acordo de terra. Perguntar não é desconfiança: é cuidar do combinado dos dois lados.' : 'Perguntas que valem a pena fazer antes de assinar.'}</p>
-        <ul class="lista-dividida">${an.perguntas.map((q) => `<li><p class="leitura">“${esc(q)}”</p>${botaoGuardar(q, doc)}</li>`).join('')}</ul>
-        ${ouvir('perg-' + doc.id, 'Perguntas para fazer. ' + an.perguntas.join(' '))}
-      </section>
-
-      <section class="cartao escuro" aria-labelledby="t-ajuda">
-        <div class="linha"><span class="ic claro">${I('pessoas')}</span><h2 id="t-ajuda" class="t-secao claro">Quando buscar ajuda</h2></div>
-        <ul class="grupo" style="margin:0;padding-left:var(--s3)">${an.quando.map((q) => `<li class="leitura claro">${esc(q)}</li>`).join('')}</ul>
-        <h3 class="claro">Quem pode ajudar</h3>
-        ${D.QUEM_AJUDA.slice(0, 3).map((q) => `<div class="grupo-justo" style="background:var(--c-forte-suave);border-radius:var(--r-m);padding:var(--s2) var(--s3)"><strong class="claro">${esc(q.nome)}</strong><span class="corpo claro">${esc(q.texto)}</span></div>`).join('')}
-        ${ouvir('ajuda-' + doc.id, 'Quando buscar ajuda. ' + an.quando.join(' ') + ' Quem pode ajudar: ' + D.QUEM_AJUDA.slice(0, 3).map((q) => q.nome + '. ' + q.texto).join(' '))}
-        <a class="botao claro-sec" href="#/ajuda">Ver todos que podem ajudar</a>
-      </section>
-
       <div class="grupo">
-        <button type="button" class="botao primario" data-acao="compartilhar-papel" data-id="${doc.id}">${I('enviar')}Mandar para alguém da família</button>
-        <button type="button" class="botao texto" data-acao="excluir-papel" data-id="${doc.id}" style="align-self:center">${I('lixeira')}Excluir este papel</button>
+        <button type="button" class="botao primario" data-acao="compartilhar-papel" data-id="${doc.id}">${I('enviar')}Mandar para alguém de confiança</button>
+        ${doc.origem === 'exemplo' ? '' : `<button type="button" class="botao texto" data-acao="excluir-papel" data-id="${doc.id}" style="align-self:center">${I('lixeira')}Excluir este papel</button>`}
       </div>
-      <p class="linha-topo auxiliar">${I('info')}<span style="flex:1">O AgroNosso ajuda a entender o papel, mas não decide por você e não substitui a orientação de um profissional.</span></p>`,
+`,
+      montar: () => {
+        // A11: lê a explicação em voz assim que abre, se a pessoa ligou essa opção
+        if (estado.config.vozAuto && veioDoFluxo) setTimeout(() => tocar('tudo-' + doc.id), 500);
+      },
     };
   }
 
@@ -670,12 +907,14 @@
       '',
       an.resumo,
       '',
+      ...(an.fatos || []).filter((f) => f.valor).map((f) => `• ${f.rotulo}: ${f.valor}`),
+      '',
       ...an.pontos.map((p) => `• ${p.titulo}: ${p.texto}${p.alerta ? ' ATENÇÃO: ' + p.alerta : ''}`),
       '',
       'Perguntas para fazer:',
       ...an.perguntas.slice(0, 5).map((q) => `- ${q}`),
       '',
-      'É uma explicação para ajudar a entender. Não substitui a orientação de um profissional.',
+      'É uma explicação para ajudar a entender. A leitura pode errar: confira no papel. Não substitui a orientação de um profissional.',
     ].join('\n');
   }
 
@@ -714,6 +953,7 @@
       corpo += `<div class="linha" style="flex-wrap:wrap;gap:var(--s1)">${q.atalhos.map((a) => `<button type="button" class="botao secundario auto" data-acao="comb-atalho" data-campo="${q.campos[0][0]}" data-valor="${esc(a)}">${esc(a)}</button>`).join('')}</div>`;
     }
     if (q.campos) {
+      corpo += '<p class="pequeno linha" style="gap:var(--s1)">' + I('som', 18) + 'Dica: toque no microfone do teclado para falar em vez de escrever.</p>';
       corpo += q.campos.map(([k, rot, ph]) => `<div class="campo"><label for="c-${k}">${esc(rot)}</label><input id="c-${k}" data-campo="${k}" value="${esc(r[k] || '')}" placeholder="${esc(ph)}" autocomplete="off"></div>`).join('');
     }
     if (q.tipo === 'despesas') {
@@ -864,24 +1104,25 @@
       ['Leia ou ouça as dicas de foto.', 'Papel esticado, boa luz e celular parado.'],
       'Toque em <strong>Abrir câmera</strong> e tire a foto do papel.',
       ['Confira se dá para ler as letras.', 'Se não der, toque em Tirar de novo. Se tiver mais folhas, toque em Adicionar outra folha.'],
-      ['Toque em <strong>Sim, ler o papel</strong> e espere.', 'Pode levar até 1 minuto. Na primeira vez, use o Wi-Fi se puder.'],
+      ['Toque em <strong>Sim, ler o papel</strong> e espere.', 'Pode levar até 1 minuto. Na primeira vez, use o Wi-Fi se puder. Da segunda vez em diante, o app já lembra quem você é no acordo.'],
+      ['Confira o que o app leu: valor, prazo, datas e quem paga.', 'Se algo estiver errado, toque em Corrigir o texto. Depois, toque em Está certo, ver a explicação.'],
       'Ouça ou leia o resumo em <strong>Em poucas palavras</strong>.',
       ['Abra cada parte: quanto custa, até quando vale, quem paga o quê, como sair.', 'O sinal de <strong>Atenção</strong> mostra o que pode pesar para você.'],
     ] },
     { id: 'perguntas', icone: 'balao', titulo: 'Como guardar perguntas', passos: [
-      'Na explicação, desça até <strong>Perguntas para fazer</strong>.',
+      'Na explicação, desça até <strong>Perguntas para levar à conversa</strong>.',
       'Toque em <strong>Guardar esta pergunta</strong> nas que você quiser fazer.',
-      ['Para ver todas, toque em <strong>Perguntas</strong> no menu de baixo.', 'Você também pode escrever as suas.'],
+      ['Para ver as que você guardou, toque em <strong>Perguntas</strong> no menu. Lá ficam as suas perguntas.', 'Você também pode escrever as suas.'],
       'Depois da conversa, toque na bolinha da pergunta para marcar que já foi respondida.',
     ] },
-    { id: 'familia', icone: 'enviar', titulo: 'Como mandar para a família', passos: [
+    { id: 'familia', icone: 'enviar', titulo: 'Como mandar para alguém de confiança', passos: [
       'Abra a explicação do papel.',
-      'Toque em <strong>Mandar para alguém da família</strong>.',
+      'Toque em <strong>Mandar para alguém de confiança</strong>.',
       ['Escolha o WhatsApp e a pessoa.', 'Ela recebe o resumo e as perguntas por escrito.'],
       'Assim vocês podem conversar e decidir juntos, mesmo de longe.',
     ] },
     { id: 'combinado', icone: 'lapis', titulo: 'Como anotar um combinado de boca', passos: [
-      'Na tela de início, toque em <strong>Anotar um combinado de boca</strong>.',
+      'Na tela de início, toque em <strong>Não tem papel? Anotar um combinado de boca</strong>.',
       ['Responda uma pergunta por vez: terra, pagamento, prazo, quem paga o quê.', 'Se não souber, toque em Pular esta pergunta.'],
       'No fim, ouça o resumo e confira.',
       ['Toque em <strong>Enviar pelo WhatsApp</strong> para a outra pessoa.', 'Peça para ela responder “De acordo”.'],
@@ -895,10 +1136,21 @@
       ['Procure o sindicato dos trabalhadores rurais, o técnico, o cartório ou a Defensoria Pública.', 'Leve o papel e as suas perguntas guardadas.'],
     ] },
     { id: 'dados', icone: 'cadeado', titulo: 'Seus dados e como apagar', passos: [
-      'A foto e o texto ficam só neste celular. O AgroNosso não manda para ninguém.',
+      'A foto é lida no próprio aparelho e não é enviada. Só o texto lido fica guardado, até você apagar.',
       ['Só sai do celular o que você mesmo mandar pelo WhatsApp.', ''],
-      ['Para apagar tudo, vá em <strong>Quem pode ajudar</strong> e toque em <strong>Apagar tudo deste celular</strong>.', 'Antes de apagar, o app pergunta se você tem certeza.'],
+      ['Para apagar um papel, abra o papel e toque em <strong>Excluir este papel</strong>.', ''],
+      ['Para apagar tudo, vá em <strong>Ajustes</strong> › <strong>Seus dados</strong> e toque em <strong>Apagar tudo deste celular</strong>.', 'Antes de apagar, o app pergunta se você tem certeza.'],
     ] },
+  ];
+
+  const FAQ = [
+    ['O app pode errar?', 'Pode. A leitura da foto às vezes troca ou pula letras, valores e datas. Por isso o app mostra o que leu para você conferir e avisa quando não achou alguma coisa. Sempre confira no papel.'],
+    ['Para onde vai a minha foto?', 'Para lugar nenhum. A foto é lida aqui no aparelho e não é enviada. Só o texto lido fica guardado, até você apagar. Nada é usado para treinar inteligência artificial. Se você usar a Libras, o texto que você tocar é enviado ao VLibras, do Governo Federal, para ser traduzido.'],
+    ['Gasta muita internet?', 'Só na primeira leitura, para baixar o leitor de letras, uma vez. Depois, ler papéis, ouvir e ver o que já foi guardado funciona sem internet. Dá para baixar o leitor antes, no Wi-Fi, em Ajustes. A Libras precisa de internet.'],
+    ['E se o meu acordo foi só de boca, sem papel?', 'Use Anotar um combinado de boca, na tela de início. O app faz as perguntas uma por vez e monta um resumo para mandar para a outra pessoa conferir.'],
+    ['O app substitui o advogado?', 'Não. Ele ajuda a entender e a preparar as perguntas. Para decidir, assinar ou contestar, fale com o sindicato, a Defensoria Pública ou um advogado.'],
+    ['Como aumento a letra?', 'Na tela de início, toque em A+ ou A++, em Tamanho da letra. Também dá no botão Letra maior, lá em cima.'],
+    ['O app diz se o valor é justo?', 'Não mostramos preço de mercado, porque ele muda e precisa de uma fonte confiável. Na explicação, a parte O valor é justo? mostra a quem perguntar e o que a lei do campo costuma dizer.'],
   ];
 
   function telaGuia() {
@@ -926,6 +1178,14 @@
           </div>
         </details>`).join('')}
       </div>
+      <section class="grupo" aria-labelledby="t-faq">
+        <h2 id="t-faq">Dúvidas sobre o app</h2>
+        ${FAQ.map(([q, r], i) => `
+        <details class="acordeao">
+          <summary><span class="ic">${I('ajuda')}</span><span class="t-sub">${esc(q)}</span><span class="seta-acordeao">${I('abaixo')}</span></summary>
+          <div class="corpo-acordeao"><p class="leitura">${esc(r)}</p><div class="acoes">${ouvir('faq-' + i, q + ' ' + r)}</div></div>
+        </details>`).join('')}
+      </section>
       <section class="cartao escuro">
         <h2 class="t-secao claro">Quer treinar?</h2>
         <p class="leitura claro">Faça o passo a passo com um papel de exemplo. Nada é guardado de verdade.</p>
@@ -948,7 +1208,7 @@
       html: `
       <div class="grupo-justo">
         <h1>Meus papéis</h1>
-        <p class="auxiliar">Ficam guardados só neste celular e abrem mesmo sem internet.</p>
+        <p class="auxiliar">Ficam guardados só neste aparelho e abrem sem internet. Se você limpar o navegador ou trocar de celular, eles somem. Para não perder, coloque o app na tela do celular e mande uma cópia para você no WhatsApp.</p>
       </div>
       ${vazio ? `
         <div class="grupo centro" style="text-align:center;padding:var(--s4) 0">
@@ -963,11 +1223,11 @@
         </div>
         <section class="grupo" aria-labelledby="t-lidos">
           <h2 id="t-lidos">Papéis lidos (${lista.length})</h2>
-          ${lista.length ? lista.map(itemPapel).join('') : '<p class="auxiliar">Nada encontrado.</p>'}
+          ${lista.length ? `<div class="lista-grade">${lista.map(itemPapel).join('')}</div>` : '<p class="auxiliar">Nada encontrado.</p>'}
         </section>
         <section class="grupo" aria-labelledby="t-comb">
           <h2 id="t-comb">Combinados anotados (${combs.length})</h2>
-          ${combs.length ? combs.map((c) => `<a class="item" href="#/combinado/${c.id}"><span class="ic">${I('lapis')}</span><span class="textos"><span class="t-sub">Combinado${c.respostas.outra ? ' com ' + esc(c.respostas.outra) : ''}</span><span class="pequeno">Anotado em ${data(c.criadoEm)}</span></span><span class="seta">${I('seta')}</span></a>`).join('') : `<a class="botao secundario" href="#/combinado">${I('lapis')}Anotar um combinado de boca</a>`}
+          ${combs.length ? '<div class="lista-grade">' + combs.map((c) => `<a class="item" href="#/combinado/${c.id}"><span class="ic">${I('lapis')}</span><span class="textos"><span class="t-sub">Combinado${c.respostas.outra ? ' com ' + esc(c.respostas.outra) : ''}</span><span class="pequeno">Anotado em ${data(c.criadoEm)}</span></span><span class="seta">${I('seta')}</span></a>`).join('') + '</div>' : `<a class="botao secundario" href="#/combinado">${I('lapis')}Anotar um combinado de boca</a>`}
         </section>`}`,
       montar: () => {
         const b = document.getElementById('busca');
@@ -1008,6 +1268,7 @@
         <div class="campo">
           <label for="nova-pergunta">Escreva uma pergunta</label>
           <input id="nova-pergunta" placeholder="Ex.: Posso plantar café nessa terra?">
+          <p class="pequeno linha" style="gap:var(--s1)">${I('som', 18)}Dica: toque no microfone do teclado para falar em vez de escrever.</p>
           <span class="erro" id="erro-pergunta" hidden>${I('alerta')}Escreva a pergunta antes de guardar.</span>
         </div>
         <button type="button" class="botao primario" data-acao="nova-pergunta">${I('mais')}Guardar pergunta</button>
@@ -1035,6 +1296,13 @@
   }
 
   /* ---------- Quem pode ajudar + seus dados ---------- */
+  const PASSOS_ENCONTRAR = [
+    ['Pergunte na prefeitura ou na secretaria de agricultura da sua cidade.', 'Eles sabem onde ficam o sindicato, a Emater e a cooperativa mais perto.'],
+    ['No celular, pesquise o nome do lugar junto com o nome da sua cidade.', 'Por exemplo: “sindicato dos trabalhadores rurais” e o nome da cidade.'],
+    ['Para a Defensoria Pública, pesquise “Defensoria Pública” e o nome do seu estado.', 'O atendimento é de graça para quem não pode pagar advogado.'],
+    'Leve o papel e as suas perguntas guardadas.',
+  ];
+
   function telaAjuda() {
     return {
       aba: 'guia',
@@ -1049,16 +1317,23 @@
         ${ouvir('quem-ajuda', D.QUEM_AJUDA.map((q) => q.nome + '. ' + q.texto).join(' '))}
       </div>
 
+      <section class="cartao" aria-labelledby="t-encontrar">
+        <h2 id="t-encontrar">Como encontrar perto de você</h2>
+        ${instrucoes(PASSOS_ENCONTRAR)}
+        <div class="acoes">${ouvir('encontrar', 'Como encontrar perto de você. ' + textoDe(PASSOS_ENCONTRAR))}</div>
+      </section>
+
       <section class="cartao" id="seus-dados" aria-labelledby="t-dados">
         <div class="linha"><span class="ic verde">${I('escudo')}</span><h2 id="t-dados">Quem está por trás e os seus dados</h2></div>
         <p class="leitura">O AgroNosso é um projeto de estudantes de Design Digital da FIAP (CitizenTech). Não é do dono da terra, nem do banco, nem de nenhuma empresa.</p>
         ${instrucoes([
-          'A foto e o texto ficam só neste celular.',
+          'A foto é lida no aparelho e não é enviada. Só o texto lido fica guardado aqui.',
+          ['Se você limpar o navegador ou trocar de celular, os papéis guardados somem.', 'Para ter uma cópia, mande a explicação para você mesmo no WhatsApp.'],
           'O app não pede seu nome, CPF nem senha.',
           'Só sai do celular o que você mesmo mandar.',
           'Você pode apagar tudo quando quiser.',
         ])}
-        ${ouvir('dados', 'Quem está por trás e os seus dados. O AgroNosso é um projeto de estudantes de Design Digital da FIAP. Não é do dono da terra, nem do banco. A foto e o texto ficam só neste celular. O app não pede seu nome, CPF nem senha. Só sai do celular o que você mesmo mandar. Você pode apagar tudo quando quiser.')}
+        ${ouvir('dados', 'Quem está por trás e os seus dados. O AgroNosso é um projeto de estudantes de Design Digital da FIAP. Não é do dono da terra, nem do banco. A foto e o texto ficam só neste celular. Se você limpar o navegador ou trocar de celular, os papéis guardados somem. O app não pede seu nome, CPF nem senha. Só sai do celular o que você mesmo mandar. Você pode apagar tudo quando quiser.')}
         <button type="button" class="botao secundario" data-acao="apagar-tudo">${I('lixeira')}Apagar tudo deste celular</button>
       </section>
       <a class="opcao" href="#/voz"><span class="ic">${I('som')}</span><span class="textos"><span class="t-sub">Voz do app</span><span class="auxiliar">Escolha uma voz mais natural e a velocidade.</span></span>${I('seta')}</a>
@@ -1123,6 +1398,11 @@
           <p class="auxiliar">Toque em uma opção para ouvir como fica. Você também pode mudar ao lado do botão Ouvir.</p>
         </div>
         ${seletorVelocidade('t-velocidade')}
+        <button type="button" class="chave" role="switch" aria-checked="${!!estado.config.vozAuto}" data-acao="voz-auto">
+          <span class="ic">${I('som')}</span>
+          <span class="textos"><span class="t-sub">Ler a explicação em voz assim que abrir</span><span class="estado">${estado.config.vozAuto ? 'Ligado' : 'Desligado'}</span></span>
+          <span class="trilho" aria-hidden="true"></span>
+        </button>
         <a class="opcao" href="#/voz"><span class="ic">${I('som')}</span><span class="textos"><span class="t-sub">Escolher outra voz</span><span class="auxiliar">Teste as vozes do celular e pegue a mais natural.</span></span>${I('seta')}</a>
       </section>
 
@@ -1140,6 +1420,16 @@
           <summary><span class="ic">${I('guia')}</span><span class="t-sub">Como usar a Libras</span><span class="seta-acordeao">${I('abaixo')}</span></summary>
           <div class="corpo-acordeao">${instrucoes(PASSOS_LIBRAS)}</div>
         </details>
+      </section>
+
+      <section class="grupo" aria-labelledby="t-internet">
+        <div class="grupo-justo">
+          <h2 id="t-internet">Usar com pouca internet</h2>
+          <p class="auxiliar">Baixe o leitor de letras uma vez, no Wi-Fi de casa. Depois, ler papéis não gasta mais internet, mesmo com sinal fraco na roça.</p>
+        </div>
+        ${A.leitorPronto()
+          ? `<p class="cartao suave linha">${I('circulo-certo')}<span class="corpo" style="flex:1">O leitor de letras já está neste aparelho.</span></p>`
+          : `<button type="button" class="botao secundario" data-acao="preparar-leitor">${I('sem-sinal')}Baixar o leitor de letras agora</button>`}
       </section>
 
       <a class="opcao" href="#/ajuda#seus-dados"><span class="ic">${I('cadeado')}</span><span class="textos"><span class="t-sub">Seus dados</span><span class="auxiliar">Ver o que fica guardado e apagar tudo.</span></span>${I('seta')}</a>`,
@@ -1243,12 +1533,100 @@
     'escolher-papel': (el) => { estado.config.papel = el.dataset.valor; salvar('config'); desenhar(); const b = tela.querySelector(`[data-valor="${el.dataset.valor}"]`); if (b) b.focus(); },
     'papel-continuar': () => {
       if (!estado.config.papel) { document.getElementById('erro-papel').hidden = false; return; }
+      fluxo.trocarPapel = false;
       location.hash = '#/entender/foto';
     },
     'abrir-camera': () => document.getElementById('in-camera').click(),
     'abrir-galeria': () => document.getElementById('in-galeria').click(),
     'refazer-fotos': () => { limparFluxo(); location.hash = '#/entender/foto'; desenhar(); },
-    'ler-fotos': () => { leituraErro = null; fluxo.exemplo = null; fluxo.texto = ''; location.hash = '#/entender/lendo'; },
+    'ler-fotos': async () => {
+      // Avisa sobre a internet antes de baixar o leitor pela primeira vez (M14)
+      if (!A.leitorPronto()) {
+        const ok = await confirmar({
+          titulo: 'Vai usar a internet uma vez',
+          texto: 'Para ler a primeira foto, o app baixa o leitor de letras, uma vez só (alguns MB). Depois disso, ler papéis não gasta mais internet. A foto não é enviada. Se escolher esperar o Wi-Fi e fechar o app, vai precisar tirar a foto de novo.',
+          sim: 'Continuar agora', nao: 'Esperar o Wi-Fi', icone: 'certo',
+        });
+        if (!ok) { avisar('Tudo bem. A foto fica aqui até você continuar.'); return; }
+      }
+      leituraErro = null; fluxo.exemplo = null; fluxo.texto = ''; location.hash = '#/entender/lendo';
+    },
+    'confirmar-leitura': () => {
+      const caixa = document.getElementById('texto-lido');
+      const texto = (caixa ? caixa.value : fluxo.lido || '').trim();
+      if (texto.length < 20) { avisar('Não há texto suficiente para explicar. Tire a foto de novo ou cole o texto.'); return; }
+      const correcoes = Object.assign({}, fluxo.correcoes || {});
+      const corrigido = texto !== (fluxo.lido || '').trim() || Object.keys(correcoes).length > 0;
+      const analise = aplicarCorrecoes(A.analisar(texto, estado.config.papel), correcoes);
+      let doc;
+      if (fluxo.editandoId && acharDoc(fluxo.editandoId)) {
+        doc = acharDoc(fluxo.editandoId);
+        doc.analise = analise;
+        doc.correcoes = correcoes;
+        doc.corrigido = doc.corrigido || corrigido;
+        if (doc.id !== 'exemplo') salvar('papeis');
+        avisar('Explicação atualizada com o texto corrigido.');
+      } else if (fluxo.origem === 'exemplo') {
+        doc = { id: 'exemplo', criadoEm: new Date().toISOString(), papel: estado.config.papel, origem: 'exemplo', analise, corrigido, correcoes };
+        estado.exemplo = doc;
+        avisar('Exemplo pronto. Ele não fica guardado em Papéis.');
+      } else {
+        doc = { id: novoId(), criadoEm: new Date().toISOString(), papel: estado.config.papel, origem: fluxo.origem || 'texto', analise, corrigido, correcoes };
+        estado.papeis.unshift(doc);
+        salvar('papeis');
+        avisar('Pronto! O papel foi guardado em Papéis.');
+      }
+      const editou = !!fluxo.editandoId;
+      limparFluxo();
+      resultadoDoFluxo = editou ? null : doc.id;
+      location.replace('#/resultado/' + doc.id);
+    },
+    'editar-fato': (el) => {
+      const t = document.getElementById('texto-lido');
+      if (t) fluxo.textoEditado = t.value;
+      fluxo.editandoFato = el.dataset.rotulo;
+      desenhar();
+    },
+    'salvar-fato': (el) => {
+      const inp = tela.querySelector('input[data-fato]');
+      const v = inp ? inp.value.trim() : '';
+      if (!fluxo.correcoes) fluxo.correcoes = {};
+      if (v) fluxo.correcoes[el.dataset.rotulo || inp.dataset.fato] = v;
+      fluxo.editandoFato = null;
+      desenhar();
+      if (v) avisar('Informação corrigida.');
+    },
+    'cancelar-fato': () => { fluxo.editandoFato = null; desenhar(); },
+    'trocar-papel': () => { fluxo.trocarPapel = true; location.hash = '#/entender'; },
+    'voz-auto': () => {
+      estado.config.vozAuto = !estado.config.vozAuto;
+      salvar('config');
+      desenhar();
+      avisar(estado.config.vozAuto ? 'A explicação vai ser lida em voz assim que abrir.' : 'A leitura automática foi desligada.');
+    },
+    'corrigir-doc': (el) => {
+      const d = acharDoc(el.dataset.id);
+      if (!d) return;
+      limparFluxo();
+      estado.config.papel = d.papel || estado.config.papel;
+      fluxo.lido = d.analise.texto; fluxo.origem = d.origem; fluxo.editandoId = d.id; fluxo.ativo = true;
+      fluxo.correcoes = Object.assign({}, d.correcoes || {});
+      location.hash = '#/entender/conferir';
+    },
+    'copiar-explicacao': async (el) => {
+      const d = acharDoc(el.dataset.id);
+      if (!d) return;
+      try { await navigator.clipboard.writeText(textoCompartilhar(d).replace(/\*/g, '')); avisar('Texto copiado.'); }
+      catch (e) { avisar('Não deu para copiar. Use o botão Mandar para alguém de confiança.'); }
+    },
+    'preparar-leitor': async (el) => {
+      if (!navigator.onLine) return avisar('Não há internet agora. Tente de novo no Wi-Fi.');
+      el.disabled = true;
+      el.innerHTML = `${I('relogio')}Baixando o leitor…`;
+      try { await A.prepararLeitor(); avisar('Pronto! O leitor de letras está no aparelho.'); }
+      catch (e) { avisar('Não deu para baixar agora. Tente de novo no Wi-Fi.'); }
+      desenhar();
+    },
     'ler-texto': () => {
       const t = document.getElementById('campo-texto').value.trim();
       if (t.length < 40) { document.getElementById('erro-texto').hidden = false; return; }
@@ -1269,7 +1647,7 @@
     'tentar-de-novo': () => { leituraErro = null; desenhar(); },
 
     'guardar-pergunta': (el) => {
-      const doc = estado.papeis.find((p) => p.id === el.dataset.doc);
+      const doc = acharDoc(el.dataset.doc);
       estado.perguntas.unshift({ id: novoId(), texto: el.dataset.texto, docId: doc ? doc.id : null, docTitulo: doc ? doc.analise.tipoNome : null, resolvida: false, criadaEm: new Date().toISOString() });
       salvar('perguntas');
       el.outerHTML = botaoGuardar(el.dataset.texto, doc);
@@ -1297,7 +1675,7 @@
     },
     'compartilhar-perguntas': () => compartilhar(['Minhas perguntas (anotadas no AgroNosso):', '', ...estado.perguntas.filter((p) => !p.resolvida).map((p, i) => `${i + 1}. ${p.texto}`)].join('\n')),
 
-    'compartilhar-papel': (el) => { const d = estado.papeis.find((p) => p.id === el.dataset.id); if (d) compartilhar(textoCompartilhar(d)); },
+    'compartilhar-papel': (el) => { const d = acharDoc(el.dataset.id); if (d) compartilhar(textoCompartilhar(d)); },
     'excluir-papel': async (el) => {
       const i = estado.papeis.findIndex((p) => p.id === el.dataset.id);
       if (i < 0) return;
@@ -1398,6 +1776,13 @@
   };
 
   async function compartilhar(texto) {
+    const ok = await confirmar({
+      titulo: 'Veja o que vai ser enviado',
+      texto: 'Confira o texto. Depois, escolha a pessoa de confiança, por exemplo no WhatsApp.',
+      sim: 'Enviar', nao: 'Voltar', icone: 'enviar',
+      conteudo: `<div class="previa-envio" tabindex="0">${esc(texto.replace(/\*/g, ''))}</div>`,
+    });
+    if (!ok) return;
     if (navigator.share) {
       try { await navigator.share({ text: texto }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
     }
@@ -1438,6 +1823,7 @@
     else if (r === 'entender' && !sub) v = telaEntender();
     else if (r === 'entender' && sub === 'foto') v = telaFoto();
     else if (r === 'entender' && sub === 'texto') v = telaTexto();
+    else if (r === 'entender' && sub === 'conferir') v = fluxo.lido ? telaConferir() : (location.replace('#/entender/foto'), null);
     else if (r === 'entender' && sub === 'lendo') v = (fluxo.fotos.length || fluxo.texto || fluxo.exemplo || leituraErro) ? telaLendo() : (location.replace('#/entender/foto'), null);
     else if (r === 'resultado') v = telaResultado(sub);
     else if (r === 'combinado' && sub) v = telaCombinadoResumo(sub);
@@ -1452,6 +1838,7 @@
     if (!v) return;
 
     tela.innerHTML = v.html;
+    document.body.dataset.tela = r;
     document.body.classList.toggle('sem-topo', !!v.semTopo);
     document.body.classList.toggle('sem-abas', !!v.semAbas);
     document.querySelectorAll('#abas a').forEach((a) => {
@@ -1470,6 +1857,7 @@
     const atual = location.hash.split('#').slice(0, 2).join('#');
     if (atual !== ultimaRota) {
       V.parar();
+      fluxo.escolhendoPapel = false;
       if (ultimaRota.startsWith('#/entender/lendo')) A.cancelarLeitura();
       if (!atual.startsWith('#/resultado/')) resultadoDoFluxo = null;
       ultimaRota = atual;
@@ -1515,24 +1903,25 @@
   /* Libras: botão azul sempre visível. Abre o VLibras, ferramenta gratuita do Governo Federal (precisa de internet). */
   const botaoLibras = document.getElementById('botao-libras');
   let librasCarregando = null;
+  /* O VLibras pronto para abrir: o script cria window.VLibrasWidget.open logo depois de carregar */
+  const librasPronta = () => !!(window.VLibrasWidget && typeof window.VLibrasWidget.open === 'function');
   function carregarLibras() {
-    if (window.VLibrasWidget) return Promise.resolve(true);
+    if (librasPronta()) return Promise.resolve(true);
     if (librasCarregando) return librasCarregando;
     librasCarregando = new Promise((ok) => {
       const s = document.createElement('script');
       s.src = 'https://vlibras.gov.br/app/vlibras-plugin.js';
       s.onload = () => {
-        // A versão atual inicia sozinha; se não iniciar, chamamos o widget.
-        setTimeout(() => {
-          if (!window.VLibrasWidget && window.VLibras && window.VLibras.Widget) {
-            try { new window.VLibras.Widget({ rootPath: 'https://vlibras.gov.br/app', position: 'R', avatar: 'icaro' }); } catch (e) { /* sem tradutor */ }
-          }
-        }, 300);
         // espera o widget ficar pronto (até 10 segundos)
         let tentativas = 0;
         const t = setInterval(() => {
           tentativas++;
-          if (window.VLibrasWidget || tentativas > 50) { clearInterval(t); esconderBotaoOficial(); ok(!!window.VLibrasWidget); }
+          if (librasPronta() || tentativas > 50) {
+            clearInterval(t);
+            esconderBotaoOficial();
+            if (!librasPronta()) librasCarregando = null;
+            ok(librasPronta());
+          }
         }, 200);
       };
       s.onerror = () => { librasCarregando = null; ok(false); };
@@ -1540,10 +1929,11 @@
     });
     return librasCarregando;
   }
-  /* O VLibras tem o próprio botão; usamos o nosso, maior e com nome, para não ficar repetido. */
+  /* O VLibras coloca um botão próprio no canto da tela. Usamos só o nosso, maior e com nome.
+     O CSS esconde #vlibras-access-wrapper; aqui reforçamos, caso o estilo demore a valer. */
   function esconderBotaoOficial() {
-    const b = window.VLibrasWidget && window.VLibrasWidget.initBtn;
-    if (b && b.style) b.style.setProperty('display', 'none', 'important');
+    const w = document.getElementById('vlibras-access-wrapper');
+    if (w) w.style.setProperty('display', 'none', 'important');
   }
   async function abrirLibras() {
     if (!navigator.onLine) return avisar('A Libras precisa de internet. Conecte e tente de novo.');
@@ -1552,22 +1942,43 @@
     const ok = await carregarLibras();
     botaoLibras.removeAttribute('aria-busy');
     botaoLibras.classList.remove('carregando');
-    const b = window.VLibrasWidget && window.VLibrasWidget.initBtn;
-    if (ok && b) { b.click(); avisar('Toque em qualquer texto para ver em Libras.'); }
-    else if (ok) avisar('Toque no botão do VLibras, no canto da tela, e depois em um texto.');
-    else avisar('Não deu para abrir a Libras agora. Ela precisa de internet. Tente de novo depois.');
+    if (ok) {
+      esconderBotaoOficial();
+      try { window.VLibrasWidget.open(); } catch (e) { /* abre pelo botão oficial, se existir */ }
+      avisar('Toque em qualquer texto para ver em Libras.');
+    } else {
+      avisar('Não deu para abrir a Libras agora. Ela precisa de internet. Tente de novo depois.');
+    }
   }
   function aplicarLibras() {
     const mostrar = !estado.config.semLibras;
     botaoLibras.hidden = !mostrar;
     document.body.classList.toggle('com-libras', mostrar);
-    // deixa pronto em segundo plano para abrir mais rápido
-    if (mostrar && navigator.onLine) setTimeout(() => carregarLibras(), 2500);
+    // Não baixa em segundo plano, para não gastar o pacote de dados (M14). Só carrega ao tocar.
   }
   botaoLibras.addEventListener('click', abrirLibras);
 
   const topo = document.getElementById('topo');
-  window.addEventListener('scroll', () => topo.classList.toggle('rolado', window.scrollY > 8), { passive: true });
+  let ultimoY = 0;
+  window.addEventListener('scroll', () => {
+    const y = window.scrollY;
+    topo.classList.toggle('rolado', y > 8);
+    // A7: ao rolar para baixo, o botão de Libras sai do caminho; ao subir, volta
+    const bl = document.getElementById('botao-libras');
+    if (bl) {
+      if (y > ultimoY + 6 && y > 120) bl.classList.add('recolhido');
+      else if (y < ultimoY - 6 || y < 120) bl.classList.remove('recolhido');
+    }
+    ultimoY = y;
+  }, { passive: true });
+  /* No computador, o menu lateral começa exatamente onde o topo termina (sem linhas desencontradas) */
+  function medirTopo() {
+    const h = topo.offsetHeight;
+    if (h) document.documentElement.style.setProperty('--altura-topo', h + 'px');
+  }
+  if ('ResizeObserver' in window) new ResizeObserver(medirTopo).observe(topo);
+  window.addEventListener('resize', medirTopo);
+  medirTopo();
 
   const avisoOffline = document.getElementById('aviso-offline');
   const conexao = () => { avisoOffline.hidden = navigator.onLine; };
@@ -1575,7 +1986,17 @@
   window.addEventListener('offline', conexao);
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    // Quando sai uma versão nova, o app recarrega uma vez sozinho para mostrar a novidade
+    const tinhaVersao = !!navigator.serviceWorker.controller;
+    let recarregou = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (tinhaVersao && !recarregou) { recarregou = true; location.reload(); }
+    });
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+        .then((reg) => reg.update())
+        .catch(() => {});
+    });
   }
 
   window.Icones.hidratar(document);

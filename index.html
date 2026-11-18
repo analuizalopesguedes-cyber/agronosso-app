@@ -6,6 +6,11 @@
   <title>AgroNosso</title>
   <meta name="description" content="O AgroNosso explica papéis e contratos do campo em palavras simples, com áudio e passo a passo.">
   <meta name="theme-color" content="#F4EFE4" id="cor-tema">
+  <!-- Diz ao navegador que o app tem modo claro e escuro próprios.
+       Evita que o "modo escuro forçado" do celular (Chrome, Samsung Internet, Xiaomi)
+       inverta as cores da marca. -->
+  <meta name="color-scheme" content="light dark">
+  <meta name="supported-color-schemes" content="light dark">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
@@ -24,6 +29,8 @@
         var t = c.tema || 'auto';
         var escuro = t === 'escuro' || (t === 'auto' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
         document.documentElement.dataset.tema = escuro ? 'escuro' : 'claro';
+        var m = document.getElementById('cor-tema');
+        if (m) m.setAttribute('content', escuro ? '#263F35' : '#F4EFE4');
         if (c.letra) document.documentElement.dataset.letra = c.letra === true ? 'grande' : c.letra;
       } catch (e) {}
     })();

@@ -26,6 +26,52 @@ Projeto acadêmico · CitizenTech / FIAP · Design Digital.
 
 > A explicação é feita por regras e serve para ajudar a entender. Não é conselho jurídico e não decide pela pessoa.
 
+## Melhorias a partir dos testes com usuários (nov/2026)
+
+Testes com P1, P2, P4 e P11 geraram 20 melhorias (M01–M20, ver *Consolidação de Melhorias*). Status no protótipo: **implementada, falta verificar em novo teste** (exceto onde indicado).
+
+| Código | O que mudou no app |
+|---|---|
+| M01 | Letra base maior (17px) e textos da tela inicial ainda maiores |
+| M02 | Controle **Tamanho da letra (A, A+, A++)** na tela inicial e já na primeira tela de boas-vindas |
+| M03 | "Papéis recentes" virou **Papéis que você já leu**, com explicação; as perguntas avisam que não são respostas do app |
+| M04 | Exemplos não ficam mais guardados em Papéis (causa provável do documento que aparecia no primeiro uso) e são limpos de quem já tinha |
+| M05 | Leitura de mais formatos de data (09/07/2017, 09.07.2017, 9 de jul. de 2017…), correção de "O" lido no lugar de zero e busca da **data de assinatura**. Quando não acha, diz "não achamos no texto lido", e não "o papel não tem" |
+| M06 | Nova etapa **Confira o que o app leu**, com o texto editável e "Corrigir o texto" também na explicação |
+| M07 | Cartão **Antes de tirar a foto**: quem fez o app, o que acontece com a foto, quem vê, IA, por quanto tempo e como apagar |
+| M08 | Voz mantida em todas as telas (verificar em teste) |
+| M09 | Frase de propósito no topo da tela inicial (verificar em teste) |
+| M10 | Passos Foto → Conferir → Explicação, com aviso do que vem depois |
+| M11 | Cartão **Valores, datas e prazos** com valor, prazo, datas de pagamento, data de assinatura e quem paga |
+| M12 | Aviso no topo da explicação: é apoio, não decisão; a leitura pode errar |
+| M13 | **Ler a explicação inteira em texto** e **Copiar o texto** |
+| M14 | Aviso antes de usar a internet; **Baixar o leitor agora** (Ajustes); Libras só carrega ao tocar |
+| M15 | Dica para falar pelo microfone do teclado em vez de digitar |
+| M16 | **Veja o que vai ser enviado** antes de compartilhar; conferir leitura antes da explicação |
+| M17 | **Perguntas frequentes** no guia "Como usar" |
+| M18 | Botão **Mandar para alguém de confiança** logo abaixo do resumo |
+| M19 | Perguntas prontas mantidas, em tom neutro |
+| M20 | Parte **O valor é justo?**: a quem perguntar e o que a lei costuma dizer, sem preço de mercado sem fonte |
+
+## Correções da avaliação heurística (v1.7.0)
+
+| ID | O que mudou |
+|---|---|
+| A1 | Na tela de foto, os botões vêm logo depois do título; as dicas ficam numa seção que abre e fecha |
+| A2 | Nomes separados: "Perguntas" (as suas), "Perguntas para levar à conversa" (na explicação) e "Dúvidas sobre o app" (no guia) |
+| A3 | Explicação mais enxuta: primeiro o que pede atenção, depois "Outras partes do papel"; perguntas e ajuda sobem; novo bloco "E agora?" |
+| A4 | Na etapa Conferir, cada informação tem "Está errado" ou "Escrever como está no papel", sem editar o texto inteiro |
+| A5 | O app avisa que os papéis somem se limpar o navegador ou trocar de celular, e sugere guardar uma cópia |
+| A6 | Boas-vindas com 4 telas; quem já disse quem é no acordo vai direto para a foto (com "Trocar") |
+| A7 | O botão de Libras sai do caminho ao rolar para baixo e volta ao subir |
+| A8 | Um só rótulo: "Mandar para alguém de confiança" |
+| A9 | Aviso de internet diz que a foto se perde se fechar o app; lembrete no Início de foto esperando |
+| A10 | Mensagens de erro ficam até a pessoa fechar; "Desfazer" fica 10 segundos |
+| A11 | Opção em Ajustes: ler a explicação em voz assim que abrir |
+| A12 | "Não tem papel? Anotar um combinado de boca" dentro do cartão principal do Início |
+| A13 | Exemplos com nome próprio ("Exemplo: aluguel de 5 hectares…") |
+| A14 | "Como encontrar perto de você" na tela Quem pode ajudar |
+
 ## Publicar no GitHub Pages
 
 1. Crie um repositório no GitHub (por exemplo, `agronosso`).
@@ -123,6 +169,19 @@ As explicações dos papéis mudam a cada documento, então continuam com a voz 
 - Ao tocar, o app abre o [VLibras](https://www.vlibras.gov.br/doc/widget/installation/webpageintegration.html), tradutor gratuito do Governo Federal. A pessoa toca em qualquer texto e o personagem traduz em Libras. Precisa de internet; sem internet, o botão avisa.
 - O script do VLibras é carregado em segundo plano alguns segundos depois de abrir o app, para a tradução abrir rápido. O botão próprio do VLibras fica escondido para não aparecer repetido.
 - Quem não quiser o botão desliga em **Ajustes › Libras**.
+
+## Celular, tablet e computador
+
+O layout se adapta à largura da tela:
+
+| Tela | Como fica |
+|---|---|
+| **Celular** (até 767px) | Uma coluna, menu embaixo, botões ocupando a largura toda |
+| **Tablet** (768px a 1023px) | Conteúdo mais largo (720px), opções e papéis em 2 colunas, menu embaixo |
+| **Computador** (a partir de 1024px) | Menu na lateral esquerda, topo de ponta a ponta, conteúdo centralizado (até ~830px), cartão principal com texto e botão lado a lado, velocidade da voz em uma linha, efeitos ao passar o mouse |
+| **Tela bem larga** (a partir de 1440px) | Papéis em 3 colunas |
+
+No computador, a tela de foto troca "Abrir câmera" por **Escolher a foto do papel** e **Colar o texto**, com a dica de mandar a foto do celular para o computador.
 
 ## Modo escuro na tela inicial
 

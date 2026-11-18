@@ -159,7 +159,7 @@
         'Cláusula 5ª – As benfeitorias realizadas pelo arrendatário, inclusive poço e sistema de irrigação, ficarão incorporadas ao imóvel, sem direito a indenização. ' +
         'Cláusula 6ª – O arrendador poderá rescindir o contrato a qualquer tempo, mediante notificação com 30 (trinta) dias de antecedência. ' +
         'Cláusula 7ª – Em caso de atraso, incidirá multa de 10% sobre o valor da parcela e juros de mora de 1% ao mês. ' +
-        'Cláusula 8ª – É vedado o subarrendamento. Fica eleito o foro da comarca de Viçosa/MG.',
+        'Cláusula 8ª – É vedado o subarrendamento. Fica eleito o foro da comarca de Viçosa/MG. E, por estarem justos e contratados, assinam o presente. Viçosa/MG, 15 de fevereiro de 2027.',
     },
     {
       chave: 'parceria',
@@ -172,7 +172,7 @@
         'Cláusula 3ª – O adubo e os defensivos serão pagos pelo parceiro outorgante e descontados da parte do parceiro outorgado na partilha. ' +
         'Cláusula 4ª – O prazo é de 3 (três) anos agrícolas, renovável por acordo entre as partes. ' +
         'Cláusula 5ª – O parceiro outorgado poderá deixar a parceria ao final de cada ano agrícola, mediante aviso prévio de 6 (seis) meses. ' +
-        'Cláusula 6ª – Em caso de alienação do imóvel, o adquirente respeitará este contrato até o fim do ano agrícola em curso.',
+        'Cláusula 6ª – Em caso de alienação do imóvel, o adquirente respeitará este contrato até o fim do ano agrícola em curso. Manhuaçu/MG, 10 de agosto de 2026.',
     },
     {
       chave: 'credito',
@@ -184,7 +184,7 @@
         'Encargos financeiros: juros de 3% ao ano. Vencimento: 15/05/2027, em parcela única. ' +
         'Em garantia, a emitente dá ao credor, em penhor cedular, a produção agrícola financiada. ' +
         'Em caso de inadimplemento, incidirão juros de mora de 1% ao mês e multa de 2% sobre o saldo devedor. ' +
-        'O empreendimento está amparado pelo PROAGRO. Fica eleito o foro da comarca de Campina Grande/PB.',
+        'O empreendimento está amparado pelo PROAGRO. Fica eleito o foro da comarca de Campina Grande/PB. Campina Grande/PB, 20/09/2026.',
     },
   ];
 

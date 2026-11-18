@@ -13,6 +13,10 @@
     return String(texto || '')
       .replace(/\r/g, '')
       .replace(/R\s*\$\s*/g, 'R$ ')
+      .replace(/\b[Oo](?=\d)/g, '0') // "O9 de julho" -> "09 de julho"
+      .replace(/(?<=\d)[Oo](?=\d)/g, '0') // "2O17" -> "2017"
+      .replace(/(\d)\s+(?=\d{2}\/\d)/g, '$1') // "0 9/07" -> "09/07"
+      .replace(/(\d{1,2})\s*º\s*(?=de\s)/g, '$1 ') // "1º de" -> "1 de"
       .replace(/[ \t]+/g, ' ')
       .replace(/\n{2,}/g, '\n')
       .replace(/-\n(\p{L})/gu, '$1') // palavra quebrada no fim da linha
@@ -51,7 +55,34 @@
   }
 
   const RE_DINHEIRO = /R\$ ?\d{1,3}(?:\.\d{3})*(?:,\d{2})?|R\$ ?\d+(?:,\d{2})?/g;
-  const RE_DATA = /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b|\b\d{1,2} de (?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)(?: de \d{4})?/gi;
+  const MES = '(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\\.?';
+  // 09/07/2017 · 09/07 · 09.07.2017 · 09-07-2017 · 9 de julho de 2017 · 9 de jul. de 2017 · 9 julho 2017
+  const RE_DATA = new RegExp(
+    '\\b\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?\\b' +
+    '|\\b\\d{1,2}[.\\-]\\d{1,2}[.\\-]\\d{2,4}\\b' +
+    '|\\b\\d{1,2}\\s+(?:de\\s+)?' + MES + '(?:\\s+(?:de\\s+)?\\d{4})?(?![\\p{L}])',
+    'giu',
+  );
+  const MESES_NOME = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  /* Escreve a data por extenso: "09/07/2017" e "09 de julho de 2017" viram "9 de julho de 2017" */
+  function dataLegivel(d) {
+    const t = d.trim();
+    let m = t.match(/^(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](\d{2,4}))?$/);
+    if (m) {
+      const mes = MESES_NOME[Number(m[2]) - 1];
+      if (!mes) return t;
+      const ano = m[3] ? (m[3].length === 2 ? '20' + m[3] : m[3]) : '';
+      return `${Number(m[1])} de ${mes}${ano ? ' de ' + ano : ''}`;
+    }
+    m = t.match(/^(\d{1,2})\s+(?:de\s+)?(\p{L}+)\.?(?:\s+(?:de\s+)?(\d{4}))?$/u);
+    if (m) {
+      const ab = semAcento(m[2]).slice(0, 3);
+      const mes = MESES_NOME.find((x) => semAcento(x).startsWith(ab)) || m[2];
+      return `${Number(m[1])} de ${mes}${m[3] ? ' de ' + m[3] : ''}`;
+    }
+    return t;
+  }
+  const temAno = (d) => /\d{4}|[\/.\-]\d{2}$/.test(d.trim());
   const RE_PORC = /\d{1,3}(?:,\d+)?\s?%/g;
 
   const tem = (f, re) => (f.match(re) || []).length > 0;
@@ -102,7 +133,7 @@
         anos = d.unidade === 'anos' ? d.n : d.unidade === 'meses' ? d.n / 12 : d.n;
         const datas = f.match(RE_DATA) || [];
         tPrazo = `O acordo vale por ${d.texto.replace(/\s*\([^)]*\)/, '')}.`;
-        if (datas.length >= 2) tPrazo += ` Começa em ${datas[0]} e termina em ${datas[1]}.`;
+        if (datas.length >= 2) tPrazo += ` Começa em ${dataLegivel(datas[0])} e termina em ${dataLegivel(datas[1])}.`;
         break;
       }
     }
@@ -111,7 +142,7 @@
       if (fVenc) {
         fUsada = fVenc;
         const datas = unico(fVenc.match(RE_DATA) || []);
-        tPrazo = `A data para pagar é ${datas.join(' e ')}${contem(fVenc, ['parcela única', 'parcela unica']) ? ', tudo de uma vez' : ''}.`;
+        tPrazo = `A data para pagar é ${datas.map(dataLegivel).join(' e ')}${contem(fVenc, ['parcela única', 'parcela unica']) ? ', tudo de uma vez' : ''}.`;
       }
     }
     const tituloPrazo = tipo === 'credito' ? 'Até quando pagar' : 'Por quanto tempo vale';
@@ -123,7 +154,7 @@
       }
       pontos.push(p);
     } else {
-      pontos.push({ id: 'prazo', icone: 'calendario', titulo: tituloPrazo, faltando: true, texto: 'Não achamos no papel até quando o acordo vale. Sem data, fica mais difícil saber os seus direitos.', pergunta: 'Até quando vale o acordo? Dá para colocar a data no papel?' });
+      pontos.push({ id: 'prazo', icone: 'calendario', titulo: tituloPrazo, faltando: true, texto: 'Não achamos no texto lido até quando o acordo vale. Se o papel não tiver mesmo essa data, fica mais difícil saber os seus direitos.', pergunta: 'Até quando vale o acordo? Dá para colocar a data no papel?' });
       if (ehTerra) alertas.push('sem-prazo');
     }
 
@@ -171,7 +202,7 @@
         alertas.push('desconto');
       }
     } else {
-      pontos.push({ id: 'valor', icone: 'dinheiro', titulo: 'Quanto custa', faltando: true, texto: 'Não achamos valor nem porcentagem no papel.', pergunta: 'Quanto é, no total, e em que datas paga?' });
+      pontos.push({ id: 'valor', icone: 'dinheiro', titulo: 'Quanto custa', faltando: true, texto: 'Não achamos valor nem porcentagem no texto lido.', pergunta: 'Quanto é, no total, e em que datas paga?' });
     }
 
     /* QUEM PAGA O QUÊ */
@@ -179,7 +210,7 @@
     if (fPaga.length) {
       pontos.push({ id: 'paga', icone: 'balanca', titulo: 'Quem paga o quê', texto: 'O papel diz quem paga algumas despesas. Leia o trecho abaixo e confira se é o que foi combinado de boca.', trechos: fPaga.slice(0, 3) });
     } else if (tipo !== 'credito') {
-      pontos.push({ id: 'paga', icone: 'balanca', titulo: 'Quem paga o quê', faltando: true, texto: 'O papel não diz quem paga as despesas (adubo, luz, água, imposto da terra).', pergunta: 'Quem paga o quê: adubo, semente, luz, água e imposto da terra?' });
+      pontos.push({ id: 'paga', icone: 'balanca', titulo: 'Quem paga o quê', faltando: true, texto: 'Não achamos no texto lido quem paga as despesas (adubo, luz, água, imposto da terra).', pergunta: 'Quem paga o quê: adubo, semente, luz, água e imposto da terra?' });
     }
 
     /* COMO SAIR */
@@ -199,7 +230,7 @@
       }
       pontos.push(p);
     } else if (tipo !== 'credito' && tipo !== 'compra') {
-      pontos.push({ id: 'sair', icone: 'porta', titulo: 'Como sair do acordo', faltando: true, texto: 'O papel não diz como o acordo pode acabar nem com quanto tempo de aviso.', pergunta: 'Se alguém precisar sair do acordo, com quanto tempo de aviso fica combinado?' });
+      pontos.push({ id: 'sair', icone: 'porta', titulo: 'Como sair do acordo', faltando: true, texto: 'Não achamos no texto lido como o acordo pode acabar nem com quanto tempo de aviso.', pergunta: 'Se alguém precisar sair do acordo, com quanto tempo de aviso fica combinado?' });
     }
 
     /* SE A TERRA FOR VENDIDA */
@@ -209,7 +240,7 @@
         pontos.push({ id: 'venda', icone: 'planta', titulo: 'Se a terra for vendida', texto: 'O papel fala do que acontece se a terra for vendida ou passar para outra pessoa.', trechos: fVenda.slice(0, 2), alerta: contem(fVenda.join(' '), ['até o fim do ano', 'ate o fim do ano', 'até o final do ano']) ? 'Pelo papel, quem comprar só respeita o acordo até o fim da safra atual. Pergunte sobre os anos seguintes.' : undefined });
         if (contem(fVenda.join(' '), ['até o fim do ano', 'ate o fim do ano'])) alertas.push('venda');
       } else if (ehTerra) {
-        pontos.push({ id: 'venda', icone: 'planta', titulo: 'Se a terra for vendida', faltando: true, texto: 'O papel não diz o que acontece se a terra for vendida ou passar para um parente do dono.', pergunta: 'Se a terra for vendida ou passar para outra pessoa, o que acontece com o acordo e com o plantio?' });
+        pontos.push({ id: 'venda', icone: 'planta', titulo: 'Se a terra for vendida', faltando: true, texto: 'Não achamos no texto lido o que acontece se a terra for vendida ou passar para um parente do dono.', pergunta: 'Se a terra for vendida ou passar para outra pessoa, o que acontece com o acordo e com o plantio?' });
       }
     }
 
@@ -225,7 +256,7 @@
         }
         pontos.push(p);
       } else {
-        pontos.push({ id: 'melhoria', icone: 'ferramenta', titulo: 'O que você colocar na terra', faltando: true, texto: 'O papel não diz como fica o que for construído ou plantado (poço, cerca, bananeira, café).', pergunta: 'O que for feito na terra (poço, cerca, irrigação) fica como no fim do acordo?' });
+        pontos.push({ id: 'melhoria', icone: 'ferramenta', titulo: 'O que você colocar na terra', faltando: true, texto: 'Não achamos no texto lido como fica o que for construído ou plantado (poço, cerca, bananeira, café).', pergunta: 'O que for feito na terra (poço, cerca, irrigação) fica como no fim do acordo?' });
       }
     }
 
@@ -260,6 +291,33 @@
       alertas.push('renuncia');
     }
 
+    /* DATAS DO PAPEL (inclui a data de assinatura) */
+    const todasDatas = unico((texto.match(RE_DATA) || []).map((d) => d.trim()));
+    let dataAss = null;
+    let fAss = null;
+    const comAss = lista.filter((f) => contem(f, ['assinad', 'assinam', 'assinatura', 'firmam', 'firmado', 'justos e contratados', 'justas e contratadas', 'local e data', 'data:']) && tem(f, RE_DATA));
+    if (comAss.length) {
+      fAss = comAss[comAss.length - 1];
+      const ds = (fAss.match(RE_DATA) || []).filter(temAno);
+      dataAss = ds.length ? ds[ds.length - 1] : (fAss.match(RE_DATA) || [])[0];
+    } else {
+      // padrão do fim do contrato: "Barra da Choça, 09 de julho de 2017" ou "Viçosa/MG, 09/07/2017"
+      const re = new RegExp('[\\p{Lu}][\\p{L} ]{2,40}(?:[\\/\\-–] ?[A-Z]{2})?, ?(' + RE_DATA.source + ')', 'gu');
+      const achados = [...texto.matchAll(re)].filter((m) => temAno(m[1]));
+      if (achados.length) {
+        dataAss = achados[achados.length - 1][1];
+        fAss = lista.find((f) => f.includes(achados[achados.length - 1][0])) || achados[achados.length - 1][0];
+      }
+    }
+    if (dataAss || todasDatas.length) {
+      let t = dataAss ? `O papel foi assinado em ${dataLegivel(dataAss)}.` : 'Não achamos no texto lido a data em que o papel foi assinado.';
+      const outras = todasDatas.filter((d) => d !== dataAss).map(dataLegivel);
+      if (outras.length) t += ` Outras datas que aparecem: ${unico(outras).slice(0, 6).join(', ')}.`;
+      pontos.push({ id: 'datas', icone: 'calendario', titulo: 'Datas do papel', texto: t, conferir: !dataAss, trechos: fAss ? [fAss] : [] });
+    } else {
+      pontos.push({ id: 'datas', icone: 'calendario', titulo: 'Datas do papel', faltando: true, conferir: true, texto: 'Não achamos nenhuma data no texto lido. Isso não quer dizer que o papel não tenha data: a leitura pode não ter pegado. Confira no papel, perto das assinaturas.' });
+    }
+
     /* PALAVRAS DIFÍCEIS */
     const n = semAcento(texto);
     const vistos = new Set();
@@ -280,7 +338,7 @@
     /* QUANDO BUSCAR AJUDA */
     const MOTIVOS = {
       'prazo-curto': 'O prazo é curto para o tipo de lavoura.',
-      'sem-prazo': 'O papel não tem data para acabar.',
+      'sem-prazo': 'Não achamos a data de fim do acordo.',
       'saida-rapida': 'O dono pode pedir a terra com pouco aviso.',
       benfeitoria: 'O que você construir fica sem pagamento.',
       hipoteca: 'A terra ou a casa fica como garantia.',
@@ -303,8 +361,45 @@
     const nAlertas = unico(alertas).length;
     resumo += nAlertas ? ` Encontramos ${plural(nAlertas, 'ponto que pede', 'pontos que pedem')} atenção.` : ' Não achamos nenhum ponto muito preocupante, mas confira cada parte.';
 
+    /* FATOS PRINCIPAIS: valor, datas, prazo e quem paga, em destaque */
+    const fatos = [];
+    const pv = pontos.find((p) => p.id === 'valor');
+    fatos.push({ icone: 'dinheiro', rotulo: tipo === 'parceria' ? 'Divisão' : 'Valor', valor: pv && !pv.faltando ? (pv.resumo || pv.texto.split(/\.\s/)[0]).replace(/^(Custa|O valor que aparece é|A colheita é dividida:)\s*/i, '').replace(/\.$/, '') : null });
+    const pp = pontos.find((p) => p.id === 'prazo');
+    fatos.push({ icone: 'relogio', rotulo: tipo === 'credito' ? 'Pagar até' : 'Prazo', valor: pp && !pp.faltando ? pp.texto.replace(/^O acordo vale por |^A data para pagar é /, '').replace(/\. Começa em (.+?) e termina em (.+?)\.$/, (_, a, b) => ` (de ${dataLegivel(a)} a ${dataLegivel(b)})`).replace(/\.$/, '') : null });
+    const fParc = lista.find((f) => contem(f, ['parcela', 'vencimento']) && tem(f, RE_DATA));
+    const datasPag = fParc ? unico((fParc.match(RE_DATA) || []).map(dataLegivel)) : [];
+    if (datasPag.length && tipo !== 'credito') fatos.push({ icone: 'calendario', rotulo: 'Datas de pagamento', valor: datasPag.join(' e ') });
+    fatos.push({ icone: 'prancheta', rotulo: 'Assinado em', valor: dataAss ? dataLegivel(dataAss) : null });
+    const pg = pontos.find((p) => p.id === 'paga');
+    if (pg) {
+      let quem = null;
+      if (!pg.faltando) {
+        const f = (pg.trechos || [])[0] || '';
+        const m = f.match(/(?:ficam?|ser[aã]o?|correr[aã]o?)\s+(?:pag[oa]s?\s+)?(?:por conta|a cargo)\s+d[oa]s?\s+([\p{L} ]+?)\s+(?:as\s+)?(?:despesas\s+(?:com|de)\s+)?(.+?)[.;]?$/iu);
+        const m2 = f.match(/^(?:Cl[áa]usula [^–-]+[–-]\s*)?(.+?)\s+ser[aã]o\s+pag[oa]s\s+pel[oa]\s+([\p{L} ]+?)(?:\s+e\s|[.,;]|$)/iu);
+        if (m) quem = `${m[1].trim().replace(/^./, (c) => c.toUpperCase())} paga: ${m[2].trim()}`;
+        else if (m2) quem = `${m2[2].trim().replace(/^./, (c) => c.toUpperCase())} paga: ${m2[1].trim().replace(/^(O|A|Os|As)\s/, (x) => x.toLowerCase())}`;
+        else quem = 'Está no papel. Veja a parte "Quem paga o quê".';
+      }
+      fatos.push({ icone: 'balanca', rotulo: 'Quem paga', valor: quem });
+    }
+
+    fatos.forEach((f) => { if (f.valor) f.valor = f.valor.replace(RE_DATA, (d) => dataLegivel(d)); });
+
+    /* O VALOR É JUSTO? Só orientação, sem inventar preço de mercado */
+    const NAO_MOSTRA = 'O AgroNosso não mostra preço de mercado, porque esses valores mudam muito e precisam de uma fonte confiável.';
+    const valorJusto = tipo === 'arrendamento'
+      ? ['Pergunte no sindicato, na cooperativa ou na Emater quanto se paga pela terra na sua região.', 'Converse com vizinhos que arrendam terra parecida, com água e acesso parecidos.', 'Pela lei do campo, em geral, o aluguel por ano não pode passar de 15% do valor da terra registrado (há exceções). Confirme no sindicato.', NAO_MOSTRA]
+      : tipo === 'parceria'
+        ? ['Anote o que cada um coloca: terra, casa, máquinas, adubo, semente e trabalho.', 'A lei do campo limita a parte do dono da terra de acordo com o que ele coloca. Pergunte no sindicato qual é o limite no seu caso.', 'Compare com outros parceiros e meeiros da região.', NAO_MOSTRA]
+        : [];
+
     return {
       tipo,
+      fatos,
+      valorJusto,
+      datas: todasDatas.map(dataLegivel),
       tipoNome: tipoInfo.nome,
       oQueE: tipoInfo.oQueE,
       lei: tipoInfo.lei,
@@ -373,6 +468,7 @@
     });
     if (cancelado) throw new Error('cancelado');
     const { data } = await trabalhador.recognize(imagem);
+    marcarLeitor();
     await trabalhador.terminate();
     trabalhador = null;
     if (cancelado) throw new Error('cancelado');
@@ -381,13 +477,27 @@
     return texto;
   }
 
+  /* Baixa o leitor de letras antes (por exemplo, no Wi-Fi de casa), para depois ler sem gastar dados */
+  const CHAVE_LEITOR = 'agronosso.v1.leitor-pronto';
+  const leitorPronto = () => { try { return localStorage.getItem(CHAVE_LEITOR) === '1'; } catch (e) { return false; } };
+  const marcarLeitor = () => { try { localStorage.setItem(CHAVE_LEITOR, '1'); } catch (e) { /* sem acesso */ } };
+  async function prepararLeitor(aoProgredir) {
+    await carregarScript(TESSERACT_URL);
+    const w = await raiz.Tesseract.createWorker('por', 1, {
+      logger: (m) => aoProgredir && aoProgredir({ etapa: /language|traineddata/i.test(m.status) ? 'baixando' : 'preparando', progresso: m.progress || 0 }),
+    });
+    await w.terminate();
+    marcarLeitor();
+    return true;
+  }
+
   function cancelarLeitura() {
     cancelado = true;
     if (trabalhador) trabalhador.terminate().catch(() => {});
     trabalhador = null;
   }
 
-  const api = { analisar, lerFoto, cancelarLeitura, normalizar, frases, detectarTipo, duracoes };
+  const api = { analisar, lerFoto, cancelarLeitura, normalizar, frases, detectarTipo, duracoes, dataLegivel, prepararLeitor, leitorPronto };
   raiz.Analisador = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
